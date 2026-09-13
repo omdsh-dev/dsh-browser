@@ -152,7 +152,15 @@ export class BridgeClient {
       socket.send(JSON.stringify({
         t: 'hello',
         token: this.token,
-        caps: { textOnly: true, snapshotMaxChars: DEFAULT_SNAPSHOT_MAX_CHARS, maxInteractiveItems: 60 },
+        caps: {
+          textOnly: true,
+          snapshotMaxChars: DEFAULT_SNAPSHOT_MAX_CHARS,
+          maxInteractiveItems: 60,
+          // This build can capture the controlled tab. The bridge offers
+          // browser_screenshot only when the host can also accept an image,
+          // so a text-only deployment never sees the tool.
+          screenshots: true,
+        },
       } satisfies ClientFrame))
 
       let authed = false

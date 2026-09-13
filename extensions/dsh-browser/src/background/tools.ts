@@ -668,6 +668,64 @@ async function dispatchTabManagementTool(
  * @returns the content script's answer, or a stable error when no tab or
  *   content script is available.
  */
+/** One captured viewport, ready for the bridge to persist as an image attachment. */
+export interface ScreenshotCapture {
+  text: string
+  image: { mediaType: 'image/png'; data: string }
+}
+
+/**
+ * Capture the visible viewport of the controlled tab.
+ *
+ * `captureVisibleTab` photographs the ACTIVE tab of a window, not an arbitrary
+ * one, so the controlled tab is brought forward first when something else holds
+ * the foreground. Capturing anyway would photograph a page the caller never
+ * asked about — a correctness bug and a disclosure one at once, and it also
+ * means the user sees exactly the frame that was sent.
+ *
+ * The still covers the visible viewport only: no full-page capture and no
+ * scrolling, so what the model receives is what the user could see when they
+ * approved. Chrome rate-limits this API and protects some pages, so a refusal
+ * is reported to the model rather than retried.
+ *
+ * @param tab - the resolved controlled tab.
+ * @returns the encoded PNG plus a model-facing status line.
+ */
+async function captureControlledViewport(
+  tab: Pick<chrome.tabs.Tab, 'id' | 'url' | 'title'> & { windowId?: number },
+): Promise<ToolAnswer> {
+  const id = tab.id
+  const windowId = tab.windowId
+  if (id === undefined || windowId === undefined) {
+    return unavailable('The controlled tab has no window to capture.')
+  }
+  const [active] = await chrome.tabs.query({ active: true, windowId })
+  if (active?.id !== id) {
+    try {
+      await chrome.tabs.update(id, { active: true })
+    } catch {
+      return unavailable('The controlled tab could not be brought to the foreground, so the screenshot would have captured a different page.')
+    }
+  }
+  let dataUrl: string
+  try {
+    dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: 'png' })
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error)
+    return unavailable(`The browser refused the screenshot (${detail}). Browsers rate-limit captures and protect some pages.`)
+  }
+  const marker = 'data:image/png;base64,'
+  if (!dataUrl.startsWith(marker)) {
+    return unavailable('The browser returned a screenshot in an unexpected encoding.')
+  }
+  const display = approvalDisplayUrl(typeof tab.url === 'string' ? tab.url : '')
+  const result: ScreenshotCapture = {
+    text: `Captured the visible viewport of ${display}. This is a raster image, not the element inventory; call browser_snapshot when you need numbered targets to act on.`,
+    image: { mediaType: 'image/png', data: dataUrl.slice(marker.length) },
+  }
+  return { ok: true, result }
+}
+
 export async function dispatchToolCall(
   call: ToolCall,
   sharePageContent: 'ask' | 'auto' | 'off',
@@ -687,9 +745,10 @@ export async function dispatchToolCall(
     return dispatchTabManagementTool(call, effectiveBudget, authorize, signal, tabManagement)
   }
   // Privacy boundary: with sharing off, no page content may leave the page.
+  // A screenshot is page content, so it is refused here with the text reads.
   if (!tabManagement.unrestrictedAccess
     && sharePageContent === 'off'
-    && (call.name === 'browser_snapshot' || call.name === 'browser_get_text')) {
+    && (call.name === 'browser_snapshot' || call.name === 'browser_get_text' || call.name === 'browser_screenshot')) {
     return { ok: false, error: { code: 'action-failed', message: 'Page content sharing is disabled in Settings > Page content sharing.' } }
   }
   const tab = targetTab ?? (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]
@@ -732,6 +791,15 @@ export async function dispatchToolCall(
     }
     const refreshedTargetError = validateElementTarget(call, tab.id, executionFrames)
     if (refreshedTargetError !== undefined) return refreshedTargetError
+  }
+  // A capture needs the tab and the user's decision, but no content script:
+  // the pixels come from the tabs API, so it runs after approval and before
+  // any injection or frame targeting.
+  if (call.name === 'browser_screenshot') {
+    if (targetStillAllowed?.() === false) return targetChanged()
+    const capture = await captureControlledViewport(tab)
+    if (isCancelled(call, signal)) return cancelled()
+    return capture
   }
   if (!isInjectablePage(tab.url)) {
     return await dispatchTabNativeTool(tab.id, tab.url, tab.title, tab.windowId, call, effectiveBudget, signal, targetStillAllowed, tabManagement.commitAction)

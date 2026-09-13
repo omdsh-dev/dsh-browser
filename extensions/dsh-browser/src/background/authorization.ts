@@ -5,7 +5,7 @@ import type { TabFrame } from './frames.ts'
 import type { ApprovalPrompt } from '../security/approval.ts'
 import { getUiLocale, type UiLocale } from '../i18n.ts'
 
-const PAGE_READS = new Set(['browser_snapshot', 'browser_get_text'])
+const PAGE_READS = new Set(['browser_snapshot', 'browser_get_text', 'browser_screenshot'])
 const STATE_CHANGING_ACTIONS = new Set([
   'browser_click',
   'browser_type',
@@ -26,6 +26,23 @@ export function approvalPromptForCall(
 ): ApprovalPrompt | undefined {
   if (PAGE_READS.has(call.name)) {
     if (sharePageContent !== 'ask') return undefined
+    if (call.name === 'browser_screenshot') {
+      // A capture ships every visible pixel, including content the text
+      // channel masks, so its prompt must say that rather than reuse the
+      // page-read wording. It observes the visible viewport, so the top
+      // frame carries the origin the user is being asked about.
+      return {
+        kind: 'read',
+        action: call.name,
+        summary: localized(
+          locale,
+          'Capture a screenshot of the visible page — everything on screen is sent to the model, unmasked',
+          '截取当前可见页面的截图 —— 屏幕上的一切都会原样发送给模型，不做遮蔽',
+        ),
+        origins: uniqueOrigins(frames.filter((frame) => frame.frameId === 0), frames),
+        canTrust: false,
+      }
+    }
     const targetFrames = call.name === 'browser_snapshot'
       ? frames
       : frames.filter((frame) => frame.frameId === requestedFrame(call.args))

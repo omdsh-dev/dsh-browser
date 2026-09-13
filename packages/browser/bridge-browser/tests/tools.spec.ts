@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import type { BridgeServer } from '../src/server.ts'
-import { BROWSER_TOOL_NAMES, registerBrowserTools } from '../src/tools.ts'
+import { registerBrowserTools, TEXT_ONLY_TOOL_NAMES } from '../src/tools.ts'
 
 describe('registerBrowserTools', () => {
   function makeHarness() {
@@ -21,11 +21,11 @@ describe('registerBrowserTools', () => {
     return { ctx, bridge, requestTool, registered }
   }
 
-  it('registers the full v1 tool set', () => {
+  it('registers the full text-only tool set without an image host', () => {
     const { ctx, bridge, registered } = makeHarness()
     const disposers = registerBrowserTools(ctx, bridge, { toolTimeoutMs: 1_000, snapshotMaxChars: 12_000, maxInteractiveItems: 60 })
-    expect(registered.map((r) => r.name).sort()).toEqual([...BROWSER_TOOL_NAMES].sort())
-    expect(disposers.size).toBe(BROWSER_TOOL_NAMES.length)
+    expect(registered.map((r) => r.name).sort()).toEqual([...TEXT_ONLY_TOOL_NAMES].sort())
+    expect(disposers.size).toBe(TEXT_ONLY_TOOL_NAMES.length)
     for (const dispose of disposers.values()) dispose()
   })
 

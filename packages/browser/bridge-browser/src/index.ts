@@ -20,7 +20,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent'
-import type {} from '@deepseek-ai/dsh-attachment'
+import type { ImageAttachmentRef, SaveImageAttachment } from '@deepseek-ai/dsh-attachment'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-session-persistence'
@@ -246,10 +246,24 @@ function mountBridge(
   ctx.effect(() => ctx.webServer.register(configRoute), 'bridge-browser: /ext/bridge-config route')
 
   ctx.effect(() => {
+    // The attachment service is also the deployment's image capability: with
+    // no way to persist a screenshot there is no way to send one, so the
+    // capture tool is not registered and a text-only model never sees it.
+    const attachments = ctx.get('attachments')
+    const saveScreenshot = attachments === undefined
+      ? undefined
+      : async (image: SaveImageAttachment): Promise<ImageAttachmentRef> => {
+        const [ref] = await attachments.saveImages([image])
+        if (ref === undefined) {
+          throw new Error('The host attachment service returned no reference for the captured screenshot.')
+        }
+        return ref
+      }
     const disposers = registerBrowserTools(ctx, server, {
       toolTimeoutMs: resolved.toolTimeoutMs,
       snapshotMaxChars: resolved.snapshotMaxChars,
       maxInteractiveItems: resolved.maxInteractiveItems,
+      ...saveScreenshot === undefined ? {} : { saveScreenshot },
     })
     return () => { for (const dispose of disposers.values()) dispose() }
   }, 'bridge-browser: browser tools')

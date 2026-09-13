@@ -154,6 +154,8 @@ export class BridgeServer {
   private current: ReadyConnection | null = null
   private readonly pendingTools = new Map<string, PendingTool>()
   private readonly orderedSessionRpcs = new Map<string, Promise<void>>()
+  /** Capabilities the connected extension advertised in its `hello`, if any. */
+  private clientCaps: BridgeCaps | undefined
   private closed = false
 
   constructor(private readonly deps: BridgeServerDeps) {}
@@ -273,6 +275,19 @@ export class BridgeServer {
     return this.current !== null
   }
 
+  /**
+   * What the connected extension declared it can do.
+   *
+   * Tools are registered once at plugin load, before any extension connects,
+   * so a capability that belongs to the client build is checked here per call
+   * instead of deciding the tool surface up front.
+   *
+   * @returns the client capabilities, or undefined when nothing is connected.
+   */
+  clientCapabilities(): BridgeCaps | undefined {
+    return this.clientCaps
+  }
+
   private attach(ws: WebSocket, remoteAddress: string | undefined, origin: string | undefined): void {
     let helloTimer: NodeJS.Timeout | undefined = setTimeout(() => {
       ws.close(4001, 'hello timeout')
@@ -310,6 +325,10 @@ export class BridgeServer {
         }
         clearTimeout(helloTimer)
         helloTimer = undefined
+        // Retain what this build can do: the tool surface is decided at
+        // registration, so the capture tool checks this per call rather than
+        // offering a call an older extension cannot serve.
+        this.clientCaps = frame.caps
         this.promote(ws, remoteAddress)
         return
       }
@@ -506,6 +525,9 @@ export class BridgeServer {
     const conn = this.current
     if (conn === null) return
     this.current = null
+    // Capabilities belong to the connection that advertised them; a later
+    // extension may be a different build.
+    this.clientCaps = undefined
     clearInterval(conn.ping)
     conn.abort.abort()
     if (conn.ws.readyState === WebSocket.OPEN || conn.ws.readyState === WebSocket.CONNECTING) {
