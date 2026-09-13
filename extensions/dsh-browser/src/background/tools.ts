@@ -791,7 +791,12 @@ export async function dispatchToolCall(
   }
   const targetError = validateElementTarget(call, tab.id, frames)
   if (targetError !== undefined) return targetError
-  const approval = tabManagement.unrestrictedAccess
+  // A capture is never waved through by unrestricted access, so its prompt has
+  // to be built even then: that setting covers page reads and page actions and
+  // was written before pixels existed. Suppressing it here would skip
+  // authorization entirely and leave the policy below unreachable. Every other
+  // call keeps the fast path.
+  const approval = tabManagement.unrestrictedAccess && call.name !== 'browser_screenshot'
     ? undefined
     : approvalPromptForCall(call, sharePageContent, frames)
   if (approval !== undefined) {

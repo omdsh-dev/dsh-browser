@@ -192,3 +192,36 @@ describe('browser_screenshot consent', () => {
     expect(chromeMock.captureVisibleTab).not.toHaveBeenCalled()
   })
 })
+
+describe('browser_screenshot under unrestricted access', () => {
+  // The caller builds the approval prompt, and it used to skip that entirely
+  // when unrestricted access was on. Skipping it meant authorize() was never
+  // called, so a capture proceeded with no consent at all - the policy added to
+  // make captures ask was simply unreachable.
+  it('still asks instead of being waved through', async () => {
+    const chromeMock = mockChrome()
+    const authorize = vi.fn(async (_prompt: ApprovalPrompt) => 'approved' as const)
+
+    const answer = await dispatchToolCall(
+      screenshotCall(), 'auto', undefined, authorize, undefined, chromeMock.tab, undefined,
+      { unrestrictedAccess: true },
+    )
+
+    expect(authorize).toHaveBeenCalledTimes(1)
+    expect(authorize.mock.calls[0]![0]).toMatchObject({ action: 'browser_screenshot' })
+    expect(answer.ok).toBe(true)
+  })
+
+  it('honours a denial even when unrestricted access is on', async () => {
+    const chromeMock = mockChrome()
+    const authorize = vi.fn(async (_prompt: ApprovalPrompt) => 'denied' as const)
+
+    const answer = await dispatchToolCall(
+      screenshotCall(), 'auto', undefined, authorize, undefined, chromeMock.tab, undefined,
+      { unrestrictedAccess: true },
+    )
+
+    expect(answer.ok).toBe(false)
+    expect(chromeMock.captureVisibleTab).not.toHaveBeenCalled()
+  })
+})
