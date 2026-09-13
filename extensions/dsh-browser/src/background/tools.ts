@@ -762,7 +762,9 @@ export async function dispatchToolCall(
   if (targetStillAllowed?.() === false) return targetChanged()
   const frameError = validateFrameTarget(call, frames)
   if (frameError !== undefined) return frameError
-  if (!isInjectablePage(tab.url) && !TAB_NATIVE_TOOLS.has(call.name)) {
+  // A capture reads pixels, not the DOM, so a page the content script cannot
+  // reach is still worth photographing - that is the case pixels exist for.
+  if (!isInjectablePage(tab.url) && !TAB_NATIVE_TOOLS.has(call.name) && call.name !== 'browser_screenshot') {
     return unavailable('The current page DOM is protected by the browser. Only snapshot metadata, navigate, back, forward, and reload are available on this page.')
   }
   const targetError = validateElementTarget(call, tab.id, frames)
