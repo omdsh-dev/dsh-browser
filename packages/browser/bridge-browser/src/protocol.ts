@@ -60,14 +60,28 @@ export type RespondResult =
   | { ok: true; value?: unknown }
   | { ok: false; error: { code: string; message: string; details: Record<string, unknown> } }
 
-/** Capabilities negotiated in `hello`/`hello.ok`. The extension performs its own actions; these bounds shape page snapshots. */
+/**
+ * Capabilities negotiated in `hello`/`hello.ok`. The extension performs its
+ * own actions; these bounds shape page snapshots.
+ *
+ * `textOnly` is a required literal and doubles as the handshake's protocol
+ * marker, so it stays `true`: it describes the page channel, which remains
+ * structured text. Screenshot capture is an additive channel advertised
+ * separately, so a bridge and an extension from different revisions still
+ * negotiate.
+ */
 export interface BridgeCaps {
-  /** The extension renders page state as text only (no screenshots). */
+  /** The page-snapshot channel renders page state as text (no page images). */
   textOnly: true
   /** Upper bound on one rendered snapshot's characters (plugin config, minimum 500). */
   snapshotMaxChars: number
   /** Upper bound on interactive inventory items per snapshot (plugin config). */
   maxInteractiveItems: number
+  /**
+   * The extension can capture the controlled tab for `browser_screenshot`.
+   * Optional: absent on older builds, which must not be offered the tool.
+   */
+  screenshots?: boolean
 }
 
 /** Frames sent by the extension to the bridge plugin. */
