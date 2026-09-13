@@ -11,6 +11,9 @@ import { dispatchToolCall, type ToolCall } from '../src/background/tools.ts'
  */
 
 const PNG_BYTES = Buffer.from('fake-png-bytes')
+
+/** A capture always asks, so reaching the browser requires an approval. */
+const approve = async (): Promise<'approved'> => 'approved'
 const PNG_DATA_URL = `data:image/png;base64,${PNG_BYTES.toString('base64')}`
 
 function managedTab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.Tab {
@@ -83,7 +86,7 @@ describe('browser_screenshot capture', () => {
   it('returns the raw PNG bytes the bridge will persist', async () => {
     const chromeMock = mockChrome()
 
-    const answer = await dispatchToolCall(screenshotCall(), 'auto', undefined, undefined, undefined, chromeMock.tab)
+    const answer = await dispatchToolCall(screenshotCall(), 'auto', undefined, approve, undefined, chromeMock.tab)
 
     expect(answer.ok).toBe(true)
     const result = answer.result as { text: string; image: { mediaType: string; data: string } }
@@ -99,7 +102,7 @@ describe('browser_screenshot capture', () => {
     // photograph a page the caller never asked about.
     const chromeMock = mockChrome({ activeTabId: 99 })
 
-    await dispatchToolCall(screenshotCall(), 'auto', undefined, undefined, undefined, chromeMock.tab)
+    await dispatchToolCall(screenshotCall(), 'auto', undefined, approve, undefined, chromeMock.tab)
 
     expect(chromeMock.update).toHaveBeenCalledWith(7, { active: true })
     const updateOrder = chromeMock.update.mock.invocationCallOrder[0]!
@@ -110,7 +113,7 @@ describe('browser_screenshot capture', () => {
   it('does not disturb the foreground when the controlled tab already has it', async () => {
     const chromeMock = mockChrome()
 
-    await dispatchToolCall(screenshotCall(), 'auto', undefined, undefined, undefined, chromeMock.tab)
+    await dispatchToolCall(screenshotCall(), 'auto', undefined, approve, undefined, chromeMock.tab)
 
     expect(chromeMock.update).not.toHaveBeenCalled()
     expect(chromeMock.captureVisibleTab).toHaveBeenCalledWith(1, { format: 'png' })
@@ -121,7 +124,7 @@ describe('browser_screenshot capture', () => {
       capture: async () => { throw new Error('MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND quota exceeded') },
     })
 
-    const answer = await dispatchToolCall(screenshotCall(), 'auto', undefined, undefined, undefined, chromeMock.tab)
+    const answer = await dispatchToolCall(screenshotCall(), 'auto', undefined, approve, undefined, chromeMock.tab)
 
     expect(answer.ok).toBe(false)
     expect(answer.error?.message).toMatch(/rate-limited the screenshot/)
@@ -135,7 +138,7 @@ describe('browser_screenshot capture', () => {
       capture: async () => { throw new Error("Either the '<all_urls>' or 'activeTab' permission is required.") },
     })
 
-    const answer = await dispatchToolCall(screenshotCall(), 'auto', undefined, undefined, undefined, chromeMock.tab)
+    const answer = await dispatchToolCall(screenshotCall(), 'auto', undefined, approve, undefined, chromeMock.tab)
 
     expect(answer.ok).toBe(false)
     expect(answer.error?.message).toMatch(/permission for that tab's site/)
@@ -147,54 +150,45 @@ describe('browser_screenshot capture', () => {
   it('refuses an unexpected encoding rather than forwarding garbage', async () => {
     const chromeMock = mockChrome({ capture: async () => 'about:blank' })
 
-    const answer = await dispatchToolCall(screenshotCall(), 'auto', undefined, undefined, undefined, chromeMock.tab)
+    const answer = await dispatchToolCall(screenshotCall(), 'auto', undefined, approve, undefined, chromeMock.tab)
 
     expect(answer.ok).toBe(false)
     expect(answer.error?.message).toMatch(/unexpected encoding/)
   })
 })
 
-describe('browser_screenshot follows the sharing policy', () => {
-  it('does not prompt under auto', async () => {
+describe('browser_screenshot consent', () => {
+  it('asks even under the permissive sharing mode', async () => {
     const chromeMock = mockChrome()
-    const authorize = vi.fn(async () => 'denied' as const)
+    const authorize = vi.fn(async (_prompt: ApprovalPrompt) => 'approved' as const)
 
     const answer = await dispatchToolCall(screenshotCall(), 'auto', undefined, authorize, undefined, chromeMock.tab)
 
-    expect(authorize).not.toHaveBeenCalled()
+    // Text reads are silent here; a capture must not be.
+    expect(authorize).toHaveBeenCalledTimes(1)
     expect(answer.ok).toBe(true)
   })
 
-  it('prompts under ask and honours a denial', async () => {
+  it('honours a denial and never reaches the browser', async () => {
     const chromeMock = mockChrome()
     const authorize = vi.fn(async (_prompt: ApprovalPrompt) => 'denied' as const)
 
-    const answer = await dispatchToolCall(screenshotCall(), 'ask', undefined, authorize, undefined, chromeMock.tab)
+    const answer = await dispatchToolCall(screenshotCall(), 'auto', undefined, authorize, undefined, chromeMock.tab)
 
-    expect(authorize).toHaveBeenCalledTimes(1)
-    expect(authorize.mock.calls[0]![0]).toMatchObject({ kind: 'read', action: 'browser_screenshot' })
     expect(answer.ok).toBe(false)
-    // A denied capture must not reach the browser at all.
     expect(chromeMock.captureVisibleTab).not.toHaveBeenCalled()
-  })
-
-  it('captures under ask once approved', async () => {
-    const chromeMock = mockChrome()
-    const authorize = vi.fn(async () => 'approved' as const)
-
-    const answer = await dispatchToolCall(screenshotCall(), 'ask', undefined, authorize, undefined, chromeMock.tab)
-
-    expect(answer.ok).toBe(true)
-    expect(chromeMock.captureVisibleTab).toHaveBeenCalled()
   })
 
   it('refuses outright when sharing is off', async () => {
     const chromeMock = mockChrome()
+    const authorize = vi.fn(async (_prompt: ApprovalPrompt) => 'approved' as const)
 
-    const answer = await dispatchToolCall(screenshotCall(), 'off', undefined, undefined, undefined, chromeMock.tab)
+    const answer = await dispatchToolCall(screenshotCall(), 'off', undefined, authorize, undefined, chromeMock.tab)
 
     expect(answer.ok).toBe(false)
     expect(answer.error?.message).toMatch(/disabled in Settings/)
+    // Off means no page content leaves, so it must not even ask.
+    expect(authorize).not.toHaveBeenCalled()
     expect(chromeMock.captureVisibleTab).not.toHaveBeenCalled()
   })
 })

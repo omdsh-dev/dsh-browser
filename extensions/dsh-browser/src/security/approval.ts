@@ -1,7 +1,21 @@
 /** Shared panel/background contract for browser action approval. */
 
 export type ApprovalKind = 'read' | 'action'
-export type ApprovalDecision = 'deny' | 'allow-once' | 'always-allow-reads' | 'trust-session' | 'trust-origin'
+export type ApprovalDecision =
+  | 'deny'
+  | 'allow-once'
+  | 'always-allow-reads'
+  | 'trust-session'
+  | 'trust-origin'
+  /**
+   * Cover every later capture in this session.
+   *
+   * A screenshot ships raw pixels, which the masking that makes per-read
+   * confirmation tolerable does not reach, so it is consented to on its own
+   * terms instead of borrowing the page-sharing policy: one decision, then
+   * silence until the panel closes.
+   */
+  | 'allow-screenshots-session'
 /** Background authorization result; transport failures must not masquerade as a user decision. */
 export type ApprovalAuthorization = 'approved' | 'denied' | 'unavailable' | 'timed-out' | 'cancelled'
 
@@ -28,4 +42,5 @@ export function isApprovalDecision(value: unknown): value is ApprovalDecision {
     || value === 'always-allow-reads'
     || value === 'trust-session'
     || value === 'trust-origin'
+    || value === 'allow-screenshots-session'
 }

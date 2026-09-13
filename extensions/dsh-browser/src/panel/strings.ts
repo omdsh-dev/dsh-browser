@@ -8,6 +8,7 @@ export interface PanelCopy {
     eyebrow: string
     readTitle: string
     actionTitle: string
+    screenshotTitle: string
     request: string
     origins: string
     unknownOrigin: string
@@ -15,8 +16,10 @@ export interface PanelCopy {
     allowOnce: string
     alwaysAllowReads: string
     trustSession: string
+    allowScreenshotsSession: string
     readFootnote: string
     actionFootnote: string
+    screenshotFootnote: string
   }
   tool: {
     running: string
@@ -222,6 +225,7 @@ const EN: PanelCopy = {
     eyebrow: 'Security check',
     readTitle: 'Allow page access?',
     actionTitle: 'Allow page action?',
+    screenshotTitle: 'Allow screenshots?',
     request: 'Request',
     origins: 'Origins involved',
     unknownOrigin: 'Unknown origin',
@@ -229,8 +233,10 @@ const EN: PanelCopy = {
     allowOnce: 'Allow once',
     alwaysAllowReads: 'Always allow reads',
     trustSession: 'Trust this domain for this session',
+    allowScreenshotsSession: 'Allow screenshots for this session',
     readFootnote: 'Esc to deny · You can disable automatic reading in Settings at any time',
     actionFootnote: 'Esc to deny · Temporary trust ends when the side panel closes · Typed content is never shown',
+    screenshotFootnote: 'Esc to deny · Screenshots send every visible pixel, including what the text view masks · This choice lasts until the side panel closes',
   },
   tool: {
     running: 'Working on page',
@@ -452,6 +458,7 @@ const ZH: PanelCopy = {
     eyebrow: '安全检查',
     readTitle: '允许读取页面？',
     actionTitle: '允许执行页面操作？',
+    screenshotTitle: '允许截图吗？',
     request: '请求',
     origins: '涉及来源',
     unknownOrigin: '未知来源',
@@ -459,8 +466,10 @@ const ZH: PanelCopy = {
     allowOnce: '仅允许这一次',
     alwaysAllowReads: '始终允许读取',
     trustSession: '本次会话信任此域',
+    allowScreenshotsSession: '本次会话允许截图',
     readFootnote: 'Esc 拒绝 · 可随时在设置中关闭自动读取',
     actionFootnote: 'Esc 拒绝 · 关闭侧栏后临时信任失效 · 输入内容不会显示',
+    screenshotFootnote: 'Esc 拒绝 · 截图会发送屏幕上的每一个像素，包括文本视图所遮蔽的内容 · 此选择在关闭侧栏后失效',
   },
   tool: {
     running: '正在操作页面',

@@ -462,7 +462,11 @@ function ApprovalDialog({
           <span className="approval-shield"><ShieldIcon /></span>
           <div>
             <span className="eyebrow">{copy.approval.eyebrow}</span>
-            <h2 id="approval-title">{request.kind === 'read' ? copy.approval.readTitle : copy.approval.actionTitle}</h2>
+            <h2 id="approval-title">{
+              request.action === 'browser_screenshot'
+                ? copy.approval.screenshotTitle
+                : request.kind === 'read' ? copy.approval.readTitle : copy.approval.actionTitle
+            }</h2>
           </div>
         </div>
         <div className="approval-detail">
@@ -478,15 +482,23 @@ function ApprovalDialog({
         <div className="approval-actions">
           <button className="deny" autoFocus onClick={() => onDecision('deny')}>{copy.approval.deny}</button>
           <button className="allow" onClick={() => onDecision('allow-once')}>{copy.approval.allowOnce}</button>
-          {request.kind === 'read' && (
+          {/* A capture is not a text read: "always allow reads" would silently
+              widen the sharing policy that governs page text, so it is not
+              offered here. Screenshots get their own session-scoped answer. */}
+          {request.kind === 'read' && request.action !== 'browser_screenshot' && (
             <button className="read-always" onClick={() => onDecision('always-allow-reads')}>{copy.approval.alwaysAllowReads}</button>
+          )}
+          {request.action === 'browser_screenshot' && (
+            <button className="session-trust" onClick={() => onDecision('allow-screenshots-session')}>{copy.approval.allowScreenshotsSession}</button>
           )}
           {request.kind === 'action' && request.canTrust && request.origins.length === 1 && (
             <button className="session-trust" onClick={() => onDecision('trust-session')}>{copy.approval.trustSession}</button>
           )}
         </div>
         <small className="approval-footnote">
-          {request.kind === 'read'
+          {request.action === 'browser_screenshot'
+            ? copy.approval.screenshotFootnote
+            : request.kind === 'read'
             ? copy.approval.readFootnote
             : copy.approval.actionFootnote}
         </small>

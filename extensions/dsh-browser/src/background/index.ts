@@ -186,6 +186,24 @@ const pageSessionContexts = new PageSessionContextTracker({
 void chrome.storage.session.remove(LEGACY_RECENT_SESSION_STORAGE_KEY).catch(() => {})
 /** Ephemeral allowlist: cleared when the last side panel closes or this worker restarts. */
 const sessionTrustedActionOrigins = new Set<string>()
+/**
+ * Sessions where the user approved screenshots, cleared with the same lifetime.
+ *
+ * Keyed by session rather than by origin because the decision being made is
+ * "may this conversation photograph my screen" — one answer per session is
+ * what makes the prompt tolerable enough to keep asking at all. The empty
+ * string stands for calls that arrive without a session.
+ */
+const screenshotApprovedSessions = new Set<string>()
+
+/**
+ * Bucket one call's screenshot grant.
+ * @param sessionId - owning Agent session, or undefined when the call has none.
+ * @returns the key used for the session-scoped grant.
+ */
+function screenshotGrantKey(sessionId: string | undefined): string {
+  return sessionId ?? ''
+}
 /** Tool calls that are either withdrawable or completing an already-dispatched action. */
 interface ActiveToolCall {
   controller: AbortController
@@ -878,6 +896,13 @@ async function authorizeToolCall(
 ): Promise<ApprovalAuthorization> {
   if (signal.aborted) return 'cancelled'
   if (unrestrictedAccess) return 'approved'
+  // A capture is consented to once per session rather than once per call: the
+  // prompt built for it always asks, so an existing grant is what suppresses
+  // it. Checked before every other rule because no page-sharing or origin
+  // trust speaks for pixels.
+  if (prompt.action === 'browser_screenshot' && screenshotApprovedSessions.has(screenshotGrantKey(sessionId))) {
+    return 'approved'
+  }
   if (actionCoveredByTrustedOrigins(
     prompt,
     sessionTrustedActionOrigins,
@@ -889,6 +914,10 @@ async function authorizeToolCall(
   if (signal.aborted) return 'cancelled'
   if (result.status !== 'decision') return result.status
   const { decision } = result
+  if (decision === 'allow-screenshots-session' && prompt.action === 'browser_screenshot') {
+    screenshotApprovedSessions.add(screenshotGrantKey(sessionId))
+    return 'approved'
+  }
   if (decision === 'always-allow-reads' && prompt.kind === 'read') {
     await persistSettings({ sharePageContent: 'auto' })
     return 'approved'
@@ -1595,6 +1624,7 @@ chrome.runtime.onConnect.addListener((port) => {
       bridgeStartRevision += 1
       bridge?.suspendReconnect()
       sessionTrustedActionOrigins.clear()
+      screenshotApprovedSessions.clear()
       approvals.notifyPending()
       if (bridge?.state !== 'connected') disarmBridgeKeepalive()
     }
