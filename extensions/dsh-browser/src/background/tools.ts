@@ -675,6 +675,28 @@ export interface ScreenshotCapture {
 }
 
 /**
+ * Turn a capture refusal into something the caller can act on.
+ *
+ * Chrome rejects `captureVisibleTab` without `<all_urls>` or a granted
+ * `activeTab`, and it rate-limits captures. Those have different fixes, so the
+ * message names which one happened instead of listing both as possibilities.
+ * Chrome also refuses browser-internal and other extensions' pages outright,
+ * which no permission the model can ask for will change.
+ *
+ * @param detail - the browser's own refusal message.
+ * @returns a model-facing explanation.
+ */
+function describeCaptureRefusal(detail: string): string {
+  if (/all_urls|activeTab/i.test(detail)) {
+    return `The browser refused the screenshot (${detail}). Capture needs this extension to hold permission for that tab's site; browser-internal pages and other extensions' pages cannot be captured at all. Switch to an ordinary http(s) page and retry.`
+  }
+  if (/quota|MAX_CAPTURE/i.test(detail)) {
+    return `The browser rate-limited the screenshot (${detail}). Wait a moment, then capture again.`
+  }
+  return `The browser refused the screenshot (${detail}).`
+}
+
+/**
  * Capture the visible viewport of the controlled tab.
  *
  * `captureVisibleTab` photographs the ACTIVE tab of a window, not an arbitrary
@@ -712,7 +734,7 @@ async function captureControlledViewport(
     dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: 'png' })
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error)
-    return unavailable(`The browser refused the screenshot (${detail}). Browsers rate-limit captures and protect some pages.`)
+    return unavailable(describeCaptureRefusal(detail))
   }
   const marker = 'data:image/png;base64,'
   if (!dataUrl.startsWith(marker)) {

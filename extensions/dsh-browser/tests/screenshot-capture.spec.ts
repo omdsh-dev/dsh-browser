@@ -116,7 +116,7 @@ describe('browser_screenshot capture', () => {
     expect(chromeMock.captureVisibleTab).toHaveBeenCalledWith(1, { format: 'png' })
   })
 
-  it('reports a browser refusal instead of throwing', async () => {
+  it('names rate limiting as the cause when the browser throttles', async () => {
     const chromeMock = mockChrome({
       capture: async () => { throw new Error('MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND quota exceeded') },
     })
@@ -124,8 +124,24 @@ describe('browser_screenshot capture', () => {
     const answer = await dispatchToolCall(screenshotCall(), 'auto', undefined, undefined, undefined, chromeMock.tab)
 
     expect(answer.ok).toBe(false)
-    expect(answer.error?.message).toMatch(/refused the screenshot/)
-    expect(answer.error?.message).toContain('quota exceeded')
+    expect(answer.error?.message).toMatch(/rate-limited the screenshot/)
+    // The fix is waiting, so the message must not send the caller hunting for a
+    // permission problem.
+    expect(answer.error?.message).not.toMatch(/permission/)
+  })
+
+  it('names the permission problem and points at an ordinary page', async () => {
+    const chromeMock = mockChrome({
+      capture: async () => { throw new Error("Either the '<all_urls>' or 'activeTab' permission is required.") },
+    })
+
+    const answer = await dispatchToolCall(screenshotCall(), 'auto', undefined, undefined, undefined, chromeMock.tab)
+
+    expect(answer.ok).toBe(false)
+    expect(answer.error?.message).toMatch(/permission for that tab's site/)
+    expect(answer.error?.message).toMatch(/http\(s\) page/)
+    // Waiting would not help here, so it must not be offered as the fix.
+    expect(answer.error?.message).not.toMatch(/Wait a moment/)
   })
 
   it('refuses an unexpected encoding rather than forwarding garbage', async () => {
