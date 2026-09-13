@@ -58,9 +58,9 @@ import {
   type ApprovalRequest,
 } from '../security/approval.ts'
 import { getUiLocale } from '../i18n.ts'
+import { autoApproved } from './authorization.ts'
 import { InteractionResponseRouter } from './responses.ts'
 import {
-  actionCoveredByTrustedOrigins,
   normalizeTrustedOrigin,
 } from '../security/trusted-origins.ts'
 import { TransientEventCache } from './transient-events.ts'
@@ -895,35 +895,25 @@ async function authorizeToolCall(
   unrestrictedAccess: boolean = unrestrictedAccessEnabled(),
 ): Promise<ApprovalAuthorization> {
   if (signal.aborted) return 'cancelled'
-  const isCapture = prompt.action === 'browser_screenshot'
-  // A capture never inherits consent. Unrestricted access promises no prompts
-  // for page reads and page actions, and it was written before pixels existed,
-  // so it cannot speak for them - a user who opted out of confirmation for
-  // text did not thereby agree to photographs of their screen.
-  if (!isCapture && unrestrictedAccess) return 'approved'
-  // One approval covers every later capture in the same session, which is what
-  // makes asking every time tolerable enough to keep.
-  if (isCapture && screenshotApprovedSessions.has(screenshotGrantKey(sessionId))) {
-    return 'approved'
-  }
-  if (actionCoveredByTrustedOrigins(
-    prompt,
-    sessionTrustedActionOrigins,
-    settings.trustedActionOrigins,
-  )) {
+  if (autoApproved(prompt, {
+    unrestrictedAccess,
+    sessionTrustedOrigins: sessionTrustedActionOrigins,
+    persistentTrustedOrigins: settings.trustedActionOrigins,
+    screenshotGranted: screenshotApprovedSessions.has(screenshotGrantKey(sessionId)),
+  })) {
     return 'approved'
   }
   const result: ApprovalRequestResult = await approvals.request(prompt, signal, windowId, sessionId)
   if (signal.aborted) return 'cancelled'
   if (result.status !== 'decision') return result.status
   const { decision } = result
-  if (decision === 'allow-screenshots-session' && isCapture) {
+  if (decision === 'allow-screenshots-session' && prompt.action === 'browser_screenshot') {
     screenshotApprovedSessions.add(screenshotGrantKey(sessionId))
     return 'approved'
   }
   // Guarded against captures: this decision widens the policy governing page
   // text, which a capture neither asked about nor may change.
-  if (decision === 'always-allow-reads' && prompt.kind === 'read' && !isCapture) {
+  if (decision === 'always-allow-reads' && prompt.kind === 'read' && prompt.action !== 'browser_screenshot') {
     await persistSettings({ sharePageContent: 'auto' })
     return 'approved'
   }

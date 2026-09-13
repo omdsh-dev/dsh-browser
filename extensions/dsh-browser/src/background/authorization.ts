@@ -3,6 +3,7 @@
 import type { ToolCall } from './tools.ts'
 import type { TabFrame } from './frames.ts'
 import type { ApprovalPrompt } from '../security/approval.ts'
+import { actionCoveredByTrustedOrigins } from '../security/trusted-origins.ts'
 import { getUiLocale, type UiLocale } from '../i18n.ts'
 
 const PAGE_READS = new Set(['browser_snapshot', 'browser_get_text'])
@@ -94,10 +95,41 @@ export function approvalPromptForCall(
   }
 }
 
+/** Trust signals that can decide a call without asking the user. */
+export interface AutoApprovalState {
+  /** The user opted out of confirmation for page reads and page actions. */
+  unrestrictedAccess: boolean
+  /** Origins trusted for the current panel session. */
+  sessionTrustedOrigins: Iterable<string>
+  /** Origins trusted permanently in Settings. */
+  persistentTrustedOrigins: Iterable<string>
+  /** Whether this session has already been granted screenshots. */
+  screenshotGranted: boolean
+}
+
+/**
+ * Whether a call may proceed without showing the user a prompt.
+ *
+ * A capture never inherits consent, and this is the whole reason it is its own
+ * branch: unrestricted access promises no prompts for page reads and page
+ * actions, and it was written before pixels existed, so it cannot speak for
+ * them. Opting out of confirmation for text is not agreeing to photographs of
+ * the screen, and no origin allowlist speaks for pixels either. A capture is
+ * answered only by its own session grant.
+ *
+ * @param prompt - the decision that would otherwise be shown to the user.
+ * @param state - the trust signals currently in effect.
+ * @returns true when no prompt is needed.
+ */
+export function autoApproved(prompt: ApprovalPrompt, state: AutoApprovalState): boolean {
+  if (prompt.action === 'browser_screenshot') return state.screenshotGranted
+  if (state.unrestrictedAccess) return true
+  return actionCoveredByTrustedOrigins(prompt, state.sessionTrustedOrigins, state.persistentTrustedOrigins)
+}
+
 function requestedFrame(args: Record<string, unknown>): number {
   return typeof args.frame === 'number' && Number.isInteger(args.frame) && args.frame >= 0 ? args.frame : 0
 }
-
 function uniqueOrigins(targets: TabFrame[], allFrames: TabFrame[]): string[] {
   const origins = new Set<string>()
   for (const frame of targets) {
