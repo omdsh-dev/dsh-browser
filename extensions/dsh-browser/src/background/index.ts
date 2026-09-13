@@ -895,12 +895,15 @@ async function authorizeToolCall(
   unrestrictedAccess: boolean = unrestrictedAccessEnabled(),
 ): Promise<ApprovalAuthorization> {
   if (signal.aborted) return 'cancelled'
-  if (unrestrictedAccess) return 'approved'
-  // A capture is consented to once per session rather than once per call: the
-  // prompt built for it always asks, so an existing grant is what suppresses
-  // it. Checked before every other rule because no page-sharing or origin
-  // trust speaks for pixels.
-  if (prompt.action === 'browser_screenshot' && screenshotApprovedSessions.has(screenshotGrantKey(sessionId))) {
+  const isCapture = prompt.action === 'browser_screenshot'
+  // A capture never inherits consent. Unrestricted access promises no prompts
+  // for page reads and page actions, and it was written before pixels existed,
+  // so it cannot speak for them - a user who opted out of confirmation for
+  // text did not thereby agree to photographs of their screen.
+  if (!isCapture && unrestrictedAccess) return 'approved'
+  // One approval covers every later capture in the same session, which is what
+  // makes asking every time tolerable enough to keep.
+  if (isCapture && screenshotApprovedSessions.has(screenshotGrantKey(sessionId))) {
     return 'approved'
   }
   if (actionCoveredByTrustedOrigins(
@@ -914,11 +917,13 @@ async function authorizeToolCall(
   if (signal.aborted) return 'cancelled'
   if (result.status !== 'decision') return result.status
   const { decision } = result
-  if (decision === 'allow-screenshots-session' && prompt.action === 'browser_screenshot') {
+  if (decision === 'allow-screenshots-session' && isCapture) {
     screenshotApprovedSessions.add(screenshotGrantKey(sessionId))
     return 'approved'
   }
-  if (decision === 'always-allow-reads' && prompt.kind === 'read') {
+  // Guarded against captures: this decision widens the policy governing page
+  // text, which a capture neither asked about nor may change.
+  if (decision === 'always-allow-reads' && prompt.kind === 'read' && !isCapture) {
     await persistSettings({ sharePageContent: 'auto' })
     return 'approved'
   }
