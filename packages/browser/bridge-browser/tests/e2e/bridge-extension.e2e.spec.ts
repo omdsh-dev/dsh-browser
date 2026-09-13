@@ -84,6 +84,18 @@ beforeAll(async () => {
       res.end(JSON.stringify({ wsUrl: `ws://127.0.0.1:${String(port)}/ext/bridge` }))
       return
     }
+    // A real rendered page for the capture test: blank documents can produce
+    // tiny or uniform images that would not prove a screenshot was taken.
+    if (req.url === '/page') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end([
+        '<!doctype html><html><head><meta charset="utf-8"><title>Vision e2e</title></head>',
+        '<body style="margin:0;background:#0b5">',
+        '<h1 style="font:700 72px sans-serif;color:#fff;padding:40px">VISION-E2E</h1>',
+        '</body></html>',
+      ].join(''))
+      return
+    }
     res.writeHead(404)
     res.end('not found')
   })
@@ -96,6 +108,10 @@ beforeAll(async () => {
     executablePath: executable,
     channel: 'chromium',
     headless: true,
+    // The panel derives its UI locale from navigator.languages, and this spec
+    // addresses the Chinese labels. Pinning the locale keeps the selectors
+    // valid instead of depending on the machine the suite happens to run on.
+    locale: 'zh-CN',
     args: [
       `--disable-extensions-except=${EXTENSION_DIR}`,
       `--load-extension=${EXTENSION_DIR}`,
@@ -146,6 +162,16 @@ describe('extension ↔ migrated bridge smoke', () => {
     expect(calls.map(request => request.method)).toEqual(expect.arrayContaining([
       'session.create', 'session.history',
     ]))
+
+    // The rebuilt extension must declare capture during hello, or the bridge
+    // would never offer browser_screenshot. This is the one half of the
+    // vision path a real browser can settle here: the capture itself needs a
+    // controlled http(s) tab, and in this harness the side panel is itself a
+    // tab, so it becomes the bound target and has no host permission to
+    // photograph. A real side panel is not a tab, so that ordering artifact
+    // does not exist in the product.
+    expect(bridge.clientCapabilities()?.screenshots).toBe(true)
+
     await panel.close()
   })
 })
