@@ -8,7 +8,7 @@ Connect [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) to t
 
 `dsh` is DeepSeek AI's open-source, plugin-based agent harness. This repository provides a companion browser bridge plugin and Chrome/Firefox MV3 extension as one standalone pnpm workspace.
 
-Browser operation remains text-only: pages become structured text with a numbered inventory of interactive elements, and the model addresses those elements by number. dsh 0.1.5 multimodal chat is separate from that page channel—the side panel accepts PNG, JPEG, WebP, and GIF attachments when the host advertises image support, while browser tools still never capture screenshots.
+Page operation stays text-first: pages become structured text with a numbered inventory of interactive elements, and the model addresses those elements by number. `browser_screenshot` adds an image channel for the cases text cannot carry—layout and styling faults, charts, maps, canvas content, or a control the inventory describes ambiguously. It captures the visible viewport, is offered only when the host can store an image, and asks for consent once per session because pixels are not covered by the masking that protects text reads.
 
 > [!IMPORTANT]
 > The workspace pins dsh 0.1.5-rc.2, the minimum supported runtime. Older DSH releases are not supported.
@@ -59,6 +59,7 @@ The paired Playwright / extension duration ratio was **1.24** (95% CI **1.16–1
 | Follow tab | `browser_follow_tab` | Bind later browser tools to a tab returned by `browser_list_tabs` without activating it |
 | Close tab | `browser_close_tab` | Close a tab returned by `browser_list_tabs` |
 | Read region | `browser_get_text` | Lazy-loaded or partial page text |
+| See the page | `browser_screenshot` | Visible viewport as an image, for what text cannot carry. Offered only when the host can store an image, and asks once per session |
 | Wait for stability | `browser_wait` | Page-load and render-settle detection |
 | Send images | `session.prompt` / `session.attachment` | Host-capability-gated image drafts, image-only prompts, and durable history previews |
 | Quote a selection | side panel composer | Text you highlight in the page appears in the composer and is sent with your next message as fenced, attributed page content |
@@ -185,7 +186,8 @@ If you encounter `cache.hydratePrepared is not a function`, update the repositor
 - The bridge path sits outside the `/api` trust boundary and performs its own bearer-token authentication.
 - Local Chrome extension origins retain zero-configuration loopback access; Firefox origins are per-install UUIDs and must present the bearer token.
 - Privileged gateway methods such as `settings.*`, `credentials.*`, and `host.open*` reject non-loopback sources.
-- The browser-page pipeline is text-only and never captures screenshots; explicitly attached chat images use dsh's durable attachment service. Password and payment-card values never leave the page.
+- Text reads never carry password or payment-card values: those are masked at extraction, so the `••••` placeholder is what leaves the page. `browser_screenshot` is the exception to that guarantee, because a pixel cannot be masked after the fact — a field renders as dots, but anything else on screen is captured as it appears. That is why capture has its own consent rather than inheriting the page-sharing policy: the first capture in a session prompts, approving covers that session only, and the grant ends when the last side panel closes or the worker restarts. `off` still blocks capture outright, and unrestricted access skips the prompt as it does for every other read.
+- A capture is the visible viewport of the controlled tab and nothing else: no full-page capture and no scrolling. Browsers rate-limit captures, so a second immediate request may be refused. Chrome also refuses captures without `<all_urls>` or a granted `activeTab`, which this extension declares.
 - When work begins, the assistant binds to the active tab (at prompt submission, or at the first direct browser-tool call). If you switch tabs manually, later browser actions pause and the side panel asks whether the assistant should continue on the original tab or follow the new one. Choosing the original tab permits background operation; the extension never silently retargets or changes your visible tab. Closing the controlled tab also pauses tools until you explicitly select the current page.
 - Text you highlight is captured only while a side panel is open and page sharing is not `off`, and never from password or payment-card fields. It stays inside the extension until you send the message, is dropped when you dismiss it or its page navigates or closes, and reaches the model inside the same untrusted-content boundary as page snapshots — including its source title and URL, which the page also controls.
 - Page-authored text is wrapped as untrusted input. The default `auto` mode reads only the controlled tab without an extra prompt; privacy-sensitive users can select `ask` for per-read confirmation or `off` to block reads entirely. In `ask` mode, the read dialog can allow one read or persistently switch back to `auto`; this can be reversed in Settings. Read page text is sent to the selected model.
