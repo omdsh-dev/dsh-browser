@@ -21,4 +21,18 @@ describe('panel layout styles', () => {
     expect(settingsChildrenRule).toBeDefined()
     expect(settingsChildrenRule).toMatch(/(?:^|\n)\s*flex-shrink:\s*0;/)
   })
+
+  it('floats a scroll-to-bottom control over the conversation pane', () => {
+    const styles = readFileSync(`${process.cwd()}/src/panel/styles.css`, 'utf8')
+    const paneRule = styles.match(/\.messages-pane\s*\{([^}]*)\}/)?.[1]
+    const buttonRule = styles.match(/\.scroll-to-bottom\s*\{([^}]*)\}/)?.[1]
+
+    expect(paneRule).toBeDefined()
+    expect(paneRule).toMatch(/(?:^|\n)\s*position:\s*relative;/)
+    expect(paneRule).toMatch(/(?:^|\n)\s*flex:\s*1;/)
+    expect(buttonRule).toBeDefined()
+    expect(buttonRule).toMatch(/(?:^|\n)\s*position:\s*absolute;/)
+    expect(buttonRule).toMatch(/(?:^|\n)\s*right:\s*16px;/)
+    expect(buttonRule).toMatch(/(?:^|\n)\s*bottom:\s*12px;/)
+  })
 })
