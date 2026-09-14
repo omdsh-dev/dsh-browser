@@ -683,7 +683,7 @@ export function App(): React.JSX.Element {
     if (element === null) return
     const next = isNearScrollBottom(element)
     atBottomRef.current = next
-    setAtBottom(next)
+    setAtBottom((current) => current === next ? current : next)
   }
 
   function stickConversationToBottom(): void {
@@ -869,6 +869,18 @@ export function App(): React.JSX.Element {
     if (!atBottomRef.current) return
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
   }, [rows, streamRow, working])
+
+  // Sibling chrome (session picker, question card, errors, attachments) can
+  // resize the scrollport without a scroll event; keep bottom state honest.
+  useEffect(() => {
+    if (showSettings) return
+    const element = scrollRef.current
+    if (element === null || typeof ResizeObserver === 'undefined') return
+    syncScrollBottom()
+    const observer = new ResizeObserver(() => { syncScrollBottom() })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [showSettings, question, error, showSessionPicker, draftImages.length, selection])
 
   function applyImageProjection(sessionId: string, seq: number, value: unknown): void {
     if (sessionRef.current !== sessionId || !Number.isSafeInteger(seq)) return
