@@ -153,6 +153,66 @@ describe('withSessionDeferral', () => {
     expect(sessionPrompt).toHaveBeenCalledOnce()
   })
 
+  it('serves provisional model catalogs from session.models and defers selectModel', async () => {
+    const { api, call } = apiHarness()
+    call.mockImplementation(async (request: HostRpcCall): Promise<HostRpcResult> => {
+      if (request.method === 'session.create') {
+        return { ok: true, value: { sessionId: (request.payload as { sessionId: string }).sessionId } }
+      }
+      if (request.method === 'session.prompt') return { ok: true, value: { accepted: true } }
+      if (request.method === 'session.models') {
+        return {
+          ok: true,
+          value: {
+            current: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+            routable: true,
+            groups: [{
+              id: 'deepseek-official',
+              name: 'DeepSeek',
+              models: [{ id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' }],
+            }],
+            failures: [],
+          },
+        }
+      }
+      if (request.method === 'session.selectModel') {
+        return { ok: true, value: { selected: request.payload } }
+      }
+      return { ok: false, error: { code: 'not-found', message: request.method, details: {} } }
+    })
+    const wrapped = withSessionDeferral(api, true)
+    const id = await provisionalId(wrapped)
+
+    await expect(wrapped.call(request('session.models', { sessionId: id }))).resolves.toEqual({
+      ok: true,
+      value: {
+        current: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+        routable: true,
+        groups: [{
+          id: 'deepseek-official',
+          name: 'DeepSeek',
+          models: [{ id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' }],
+        }],
+        failures: [],
+      },
+    })
+
+    await expect(wrapped.call(request('session.selectModel', {
+      sessionId: id,
+      provider: 'deepseek-official',
+      model: 'deepseek-v4-pro',
+    }))).resolves.toEqual({
+      ok: true,
+      value: { selected: { provider: 'deepseek-official', model: 'deepseek-v4-pro' } },
+    })
+
+    await wrapped.call(request('session.prompt', { sessionId: id, mode: 'queue', content: [] }, 'prompt'))
+    expect(call).toHaveBeenCalledWith(expect.objectContaining({
+      method: 'session.selectModel',
+      payload: { sessionId: id, provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+    }))
+  })
+
   it('prunes stale provisional entries and returns the original API when disabled', async () => {
     vi.useFakeTimers()
     const { api, sessionHistory } = apiHarness()

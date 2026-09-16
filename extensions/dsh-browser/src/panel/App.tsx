@@ -111,6 +111,21 @@ interface RelayProfileDraft {
 /** Route keys managed by the relay editor; core-owned routes are never touched. */
 const RELAY_ROUTE_PREFIX = 'relay-'
 
+/** One selectable entry from `session.models` for the composer chip list. */
+interface SessionModelOption {
+  provider: string
+  providerName: string
+  id: string
+  name: string
+}
+
+/** Advisory directory snapshot used by the composer model switcher. */
+interface SessionModelDirectory {
+  current: { provider: string; model: string; reasoningEffort?: string } | null
+  options: SessionModelOption[]
+  routable: boolean | null
+}
+
 /**
  * Display names are free-form (CJK included); the route key needs the
  * ASCII shape the wire and credential refs expect, so CJK-heavy names
@@ -641,6 +656,10 @@ export function App(): React.JSX.Element {
   const [relayLoaded, setRelayLoaded] = useState(false)
   const [relayNotice, setRelayNotice] = useState<string | null>(null)
   const [relayBusy, setRelayBusy] = useState(false)
+  const [sessionModels, setSessionModels] = useState<SessionModelDirectory | null>(null)
+  const [modelSelecting, setModelSelecting] = useState(false)
+  const [showModelPicker, setShowModelPicker] = useState(false)
+  const modelPickerRef = useRef<HTMLDivElement | null>(null)
   const [sessionTitle, setSessionTitle] = useState<string | null>(null)
   const [resumeHint, setResumeHint] = useState<{ ready: boolean; sessionId: string | null }>({ ready: false, sessionId: null })
   const [questions, setQuestions] = useState<PendingQuestion[]>([])
@@ -811,6 +830,9 @@ export function App(): React.JSX.Element {
         setDraft((current) => ({ ...current, images: [] }))
         setImageLimits(null)
         imageProjectionRef.current = { sessionId: null, seq: Number.NEGATIVE_INFINITY, limits: null }
+        setSessionModels(null)
+        setModelSelecting(false)
+        setShowModelPicker(false)
         setSessionTitle(null)
         setWorking(false)
         setStopping(false)
@@ -881,6 +903,24 @@ export function App(): React.JSX.Element {
     observer.observe(element)
     return () => observer.disconnect()
   }, [showSettings, question, error, showSessionPicker, draftImages.length, selection])
+
+  useEffect(() => {
+    if (!showModelPicker) return
+    const onPointerDown = (event: PointerEvent): void => {
+      const root = modelPickerRef.current
+      if (root !== null && event.target instanceof Node && root.contains(event.target)) return
+      setShowModelPicker(false)
+    }
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setShowModelPicker(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true)
+      document.removeEventListener('keydown', onKeyDown, true)
+    }
+  }, [showModelPicker])
 
   function applyImageProjection(sessionId: string, seq: number, value: unknown): void {
     if (sessionRef.current !== sessionId || !Number.isSafeInteger(seq)) return
@@ -1139,6 +1179,124 @@ export function App(): React.JSX.Element {
     setSessionTitle(null)
     sessionRuntimeRef.current.seedRunning(created.sessionId, false)
     applyHistory(created.sessionId, await readHistory(created.sessionId))
+    await refreshSessionModels(created.sessionId)
+  }
+
+  /** Pull the advisory model directory for the active session into the composer menu. */
+  async function refreshSessionModels(sessionId: string | null = sessionRef.current): Promise<void> {
+    if (sessionId === null) {
+      setSessionModels(null)
+      setShowModelPicker(false)
+      return
+    }
+    const fromSettings = await loadModelDirectoryFromSettings().catch(() => null)
+    try {
+      const result = await api.rpc<{
+        current?: { provider: string; model: string; reasoningEffort?: string }
+        routable?: boolean
+        groups?: Array<{ id: string; name: string; models: Array<{ id: string; name: string }> }>
+      }>('session.models', { sessionId })
+      if (sessionRef.current !== sessionId) return
+      const sessionOptions = (result.groups ?? []).flatMap((group) => group.models.map((model) => ({
+        provider: group.id,
+        providerName: group.name,
+        id: model.id,
+        name: model.name,
+      })))
+      const options = sessionOptions.length > 0 ? sessionOptions : (fromSettings?.options ?? [])
+      setSessionModels({
+        current: result.current
+          ?? fromSettings?.current
+          ?? (options[0] === undefined
+            ? null
+            : { provider: options[0].provider, model: options[0].id }),
+        routable: result.routable ?? fromSettings?.routable ?? null,
+        options,
+      })
+    } catch {
+      if (sessionRef.current !== sessionId) return
+      // Host-wide settings still list configured relays before a session exists.
+      setSessionModels(fromSettings)
+    }
+  }
+
+  /** Build a composer directory from saved llm-pi-ai routes (works without a Host session). */
+  async function loadModelDirectoryFromSettings(): Promise<SessionModelDirectory | null> {
+    const described = await api.rpc<{
+      namespaces?: Array<{ ns: string; value?: Record<string, unknown> }>
+    }>('settings.describe', {})
+    const providers = (described.namespaces?.find((candidate) => candidate.ns === 'llm-pi-ai')
+      ?.value?.providers ?? {}) as Record<string, {
+      displayName?: string
+      models?: Array<{ id: string; name?: string }>
+    }>
+    const defaults = (described.namespaces?.find((candidate) => candidate.ns === 'agent-default-model')
+      ?.value ?? {}) as { provider?: unknown; model?: unknown; reasoningEffort?: unknown }
+    const options = Object.entries(providers).flatMap(([provider, route]) => (
+      (route.models ?? []).map((model) => ({
+        provider,
+        providerName: typeof route.displayName === 'string' && route.displayName !== ''
+          ? route.displayName
+          : provider,
+        id: model.id,
+        name: typeof model.name === 'string' && model.name !== '' ? model.name : model.id,
+      }))
+    )).filter((option) => option.id !== '')
+    if (options.length === 0) return { current: null, options: [], routable: false }
+    const defaultProvider = typeof defaults.provider === 'string' ? defaults.provider : ''
+    const defaultModel = typeof defaults.model === 'string' ? defaults.model : ''
+    const matched = options.find((option) => (
+      option.provider === defaultProvider && option.id === defaultModel
+    )) ?? options[0]!
+    return {
+      current: {
+        provider: matched.provider,
+        model: matched.id,
+        ...(typeof defaults.reasoningEffort === 'string' && defaults.reasoningEffort !== ''
+          ? { reasoningEffort: defaults.reasoningEffort }
+          : {}),
+      },
+      options,
+      routable: true,
+    }
+  }
+
+  /** Switch the next assembled turn onto the chosen provider/model. */
+  async function selectSessionModel(option: SessionModelOption): Promise<void> {
+    const sessionId = sessionRef.current
+    if (sessionId === null || modelSelecting || busy || working) return
+    setShowModelPicker(false)
+    if (sessionModels?.current?.provider === option.provider
+      && sessionModels.current.model === option.id) return
+    setModelSelecting(true)
+    setError(null)
+    try {
+      const result = await api.rpc<{
+        selected: { provider: string; model: string; reasoningEffort?: string }
+      }>('session.selectModel', {
+        sessionId,
+        provider: option.provider,
+        model: option.id,
+      })
+      if (sessionRef.current !== sessionId) return
+      setSessionModels((current) => current === null
+        ? {
+          current: result.selected,
+          routable: true,
+          options: [option],
+        }
+        : {
+          ...current,
+          current: result.selected,
+          routable: true,
+        })
+    } catch (cause) {
+      if (sessionRef.current === sessionId) {
+        setError(cause instanceof Error ? cause.message : String(cause))
+      }
+    } finally {
+      setModelSelecting(false)
+    }
   }
 
   /** Load the raw host index plus workspace archive state once. */
@@ -1189,6 +1347,7 @@ export function App(): React.JSX.Element {
             await api.setActiveSession(hinted)
             setSessionTitle(projectedSessionTitle(entry) ?? sessionDisplayTitle(entry))
             applyHistory(hinted, history)
+            await refreshSessionModels(hinted)
             return
           }
         } catch {
@@ -1240,6 +1399,7 @@ export function App(): React.JSX.Element {
       sessionRef.current = entry.sessionId
       setSessionTitle(projectedSessionTitle(entry) ?? sessionDisplayTitle(entry))
       await refreshHistory(entry.sessionId)
+      await refreshSessionModels(entry.sessionId)
     } catch (cause) {
       if (sessionTransitionRef.current === transition) {
         setError(cause instanceof Error ? cause.message : String(cause))
@@ -1288,6 +1448,7 @@ export function App(): React.JSX.Element {
       setSessionTitle(sessionId)
       if (history !== undefined) applyHistory(sessionId, history)
       else setError(historyError instanceof Error ? historyError.message : String(historyError))
+      await refreshSessionModels(sessionId)
     } finally {
       finishSessionTransition(transition)
     }
@@ -1300,6 +1461,8 @@ export function App(): React.JSX.Element {
     try {
       sessionRef.current = null
       setSessionTitle(null)
+      setSessionModels(null)
+      setShowModelPicker(false)
       prepareSessionSwitch(false)
       await createSession(transition)
     } catch (cause) {
@@ -1409,6 +1572,8 @@ export function App(): React.JSX.Element {
         ),
         ...(clientTimeZone === undefined ? {} : { clientTimeZone }),
       })
+      // Deferred sessions materialize on the first prompt; refresh so chips appear.
+      void refreshSessionModels(id)
       if (submittedSelection !== null) {
         // Keep the background authoritative while the prompt is in flight.
         // Conditional clearing cannot consume a newer highlight captured in
@@ -1460,6 +1625,7 @@ export function App(): React.JSX.Element {
       if (!relaySaved) return
       await api.updateSettings(settings)
       setShowSettings(false)
+      await refreshSessionModels(sessionRef.current)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     }
@@ -1736,6 +1902,30 @@ export function App(): React.JSX.Element {
   // 状态栏只显示连接状态；快照上限是技术细节，在设置页说明（见 hint）。
   const statusText = copy.status[state]
   const sessionMenuTitle = sessionTitle ?? copy.app.newSession
+  const currentModelOption = sessionModels?.options.find((option) => (
+    option.provider === sessionModels.current?.provider
+    && option.id === sessionModels.current.model
+  ))
+  const currentModelLabel = currentModelOption?.name
+    ?? (sessionModels !== null && sessionModels.options.length === 0
+      ? copy.app.noModelsConfigured
+      : copy.app.selectModel)
+  const modelMenuGroups = (() => {
+    const groups: Array<{ provider: string; providerName: string; models: SessionModelOption[] }> = []
+    for (const option of sessionModels?.options ?? []) {
+      const existing = groups.find((group) => group.provider === option.provider)
+      if (existing === undefined) {
+        groups.push({
+          provider: option.provider,
+          providerName: option.providerName,
+          models: [option],
+        })
+        continue
+      }
+      existing.models.push(option)
+    }
+    return groups
+  })()
   const approvalDialog = !approvalReadyForSession(queuedApproval, sessionRef.current, sessionChanging)
     ? null
     : <ApprovalDialog request={queuedApproval!} onDecision={decideApproval} copy={copy} />
@@ -1986,7 +2176,10 @@ export function App(): React.JSX.Element {
             aria-expanded={showTextSize} aria-label={copy.textSize.open} title={copy.textSize.open}>
             <TextSizeIcon />
           </button>
-          <button className="icon-button settings-trigger" onClick={() => setShowSettings(true)}
+          <button className="icon-button settings-trigger" onClick={() => {
+            setShowModelPicker(false)
+            setShowSettings(true)
+          }}
             aria-label={copy.app.openSettings} title={copy.app.settings}><SettingsIcon /></button>
         </div>
       </header>
@@ -2190,6 +2383,52 @@ export function App(): React.JSX.Element {
             )}
           </div>
         </div>
+        {state === 'connected' ? (
+          <div className="composer-model" ref={modelPickerRef}>
+            <button
+              type="button"
+              className="composer-model-trigger"
+              aria-expanded={showModelPicker}
+              aria-haspopup="listbox"
+              aria-label={copy.app.selectModel}
+              title={currentModelLabel}
+              disabled={!sessionReady || busy || addingImages || modelSelecting || working
+                || sessionModels === null || sessionModels.options.length === 0}
+              onClick={() => setShowModelPicker((open) => !open)}
+            >
+              <span>{currentModelLabel}</span>
+              <ChevronDownIcon />
+            </button>
+            {showModelPicker && sessionModels !== null && sessionModels.options.length > 0 ? (
+              <div className="composer-model-menu" role="listbox" aria-label={copy.app.selectModel}>
+                {modelMenuGroups.map((group) => (
+                  <div key={group.provider} className="composer-model-group" role="group" aria-label={group.providerName}>
+                    {modelMenuGroups.length > 1 ? (
+                      <div className="composer-model-group-title">{group.providerName}</div>
+                    ) : null}
+                    {group.models.map((option) => {
+                      const selected = sessionModels.current?.provider === option.provider
+                        && sessionModels.current.model === option.id
+                      return (
+                        <button
+                          key={`${option.provider}:${option.id}`}
+                          type="button"
+                          role="option"
+                          aria-selected={selected}
+                          className={selected ? 'isSelected' : undefined}
+                          title={`${option.providerName} · ${option.name}`}
+                          onClick={() => { void selectSessionModel(option) }}
+                        >
+                          <span>{option.name}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </footer>
     </div>{approvalDialog}</>
   )
