@@ -4,8 +4,8 @@
  * background (es|iife) → content (iife) → panel (React). The first target
  * cleans the output; the later ones append. Pass --watch for dev rebuilds.
  *
- * Optional: EXT_CONNECT_SRC='ws://192.168.x.x:* http://192.168.x.x:*' appends
- * those tokens to the copied manifest's connect-src for remote bridge hosts.
+ * Optional: EXT_CONNECT_SRC='…' appends extra connect-src tokens at copy time.
+ * Default manifests already allow any ws/http(s) host for LAN bridge URLs.
  */
 
 import { spawn, spawnSync } from 'node:child_process'

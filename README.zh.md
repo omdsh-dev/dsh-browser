@@ -152,18 +152,10 @@ Chrome 本机使用无需配置；Firefox 需要填写上述本地桥 token。�
 
 **远程 `--host 0.0.0.0` / 局域网部署**
 
-需要同时满足两点：
+1. 主机用可被访问的绑定启动 dsh（例如 `dsh web --host 0.0.0.0`）。`/ext/bridge-config` 会按请求的 `Host`（以及存在时的 `X-Forwarded-*`）返回 `wsUrl`。访问 `http://192.168.2.185:3080/ext/bridge-config` 会得到 `ws://192.168.2.185:3080/ext/bridge`，而不再是回环地址。
+2. 客户端打开侧栏设置，把桥地址写成 `ws://<主机IP>:3080/ext/bridge`，并粘贴主机上 `~/.dsh/ext-bridge-token` 的桥接 token。扩展默认 CSP 已允许任意 `ws`/`http(s)` 主机，无需为局域网 IP 重新打包。
 
-1. **发现地址** — `/ext/bridge-config` 会按请求的 `Host`（以及存在时的 `X-Forwarded-*`）返回 `wsUrl`。访问 `http://192.168.2.185:3080/ext/bridge-config` 会得到 `ws://192.168.2.185:3080/ext/bridge`，而不再是对本机无意义的回环地址。
-2. **扩展 CSP** — 发布用的 manifest 默认只允许回环 `connect-src`。在远程客户端加载前，用额外 origin 重新构建扩展：
-
-```sh
-EXT_CONNECT_SRC='ws://192.168.2.185:* http://192.168.2.185:*' pnpm --filter dsh-browser-extension run build
-# 或 Firefox：
-EXT_CONNECT_SRC='ws://192.168.2.185:* http://192.168.2.185:*' pnpm --filter dsh-browser-extension run build:firefox
-```
-
-然后加载 `extensions/dsh-browser/dist/`（或 `dist-firefox/`），在面板中填写 `ws://192.168.2.185:3080/ext/bridge`，并粘贴主机上 `~/.dsh/ext-bridge-token` 的桥接 token。不要把 `dsh web --host 0.0.0.0` 暴露在不信任的网络上。
+不要把 `dsh web --host 0.0.0.0` 暴露在不信任的网络上。可选：构建时仍可用 `EXT_CONNECT_SRC` 追加额外 origin，以便收紧或定制 CSP。
 
 ## 开发
 

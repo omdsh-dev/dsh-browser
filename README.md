@@ -152,18 +152,10 @@ Local Chrome use requires no configuration; Firefox requires the local bridge to
 
 **Remote `--host 0.0.0.0` / LAN deployments**
 
-Two pieces must line up:
+1. On the host, run dsh with a reachable bind (for example `dsh web --host 0.0.0.0`). `/ext/bridge-config` answers with a `wsUrl` derived from the request `Host` (and `X-Forwarded-*` when present), so `http://192.168.2.185:3080/ext/bridge-config` returns `ws://192.168.2.185:3080/ext/bridge` instead of loopback.
+2. On the client, open the side-panel settings, set the bridge address to `ws://<host-ip>:3080/ext/bridge`, and paste the bridge token from `~/.dsh/ext-bridge-token` on the host. The extension `connect-src` CSP already allows any `ws`/`http(s)` host, so no rebuild is required.
 
-1. **Bridge discovery URL** — `/ext/bridge-config` now answers with a `wsUrl` derived from the request `Host` (and `X-Forwarded-*` when present), so a client that reaches `http://192.168.2.185:3080/ext/bridge-config` receives `ws://192.168.2.185:3080/ext/bridge` instead of a useless loopback address.
-2. **Extension CSP** — the published manifests only allow `connect-src` to loopback. Rebuild the extension with extra origins before loading it on the remote client:
-
-```sh
-EXT_CONNECT_SRC='ws://192.168.2.185:* http://192.168.2.185:*' pnpm --filter dsh-browser-extension run build
-# or Firefox:
-EXT_CONNECT_SRC='ws://192.168.2.185:* http://192.168.2.185:*' pnpm --filter dsh-browser-extension run build:firefox
-```
-
-Then load `extensions/dsh-browser/dist/` (or `dist-firefox/`), set the panel bridge URL to `ws://192.168.2.185:3080/ext/bridge`, and paste the bridge token from `~/.dsh/ext-bridge-token` on the host. Do not expose `dsh web --host 0.0.0.0` on untrusted networks.
+Do not expose `dsh web --host 0.0.0.0` on untrusted networks. Optional: `EXT_CONNECT_SRC` can still append extra origins at build time if you need a tighter or custom CSP.
 
 ## Development
 
