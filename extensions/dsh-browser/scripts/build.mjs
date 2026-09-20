@@ -3,6 +3,9 @@
  * with --firefox):
  * background (es|iife) → content (iife) → panel (React). The first target
  * cleans the output; the later ones append. Pass --watch for dev rebuilds.
+ *
+ * Optional: EXT_CONNECT_SRC='ws://192.168.x.x:* http://192.168.x.x:*' appends
+ * those tokens to the copied manifest's connect-src for remote bridge hosts.
  */
 
 import { spawn, spawnSync } from 'node:child_process'
