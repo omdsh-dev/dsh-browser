@@ -1,0 +1,196 @@
+import { APIResource } from "../../../../core/resource.mjs";
+import * as BetaAPI from "../../beta.mjs";
+import * as AgentsAPI from "../../agents/agents.mjs";
+import * as EventsAPI from "../events.mjs";
+import * as SessionsAPI from "../sessions.mjs";
+import * as ThreadsEventsAPI from "./events.mjs";
+import { EventListParams, EventStreamParams, Events } from "./events.mjs";
+import { APIPromise } from "../../../../core/api-promise.mjs";
+import { PageCursor, type PageCursorParams, PagePromise } from "../../../../core/pagination.mjs";
+import { RequestOptions } from "../../../../internal/request-options.mjs";
+export declare class Threads extends APIResource {
+    events: ThreadsEventsAPI.Events;
+    /**
+     * Get Session Thread
+     *
+     * @example
+     * ```ts
+     * const betaManagedAgentsSessionThread =
+     *   await client.beta.sessions.threads.retrieve(
+     *     'sthr_011CZkZVWa6oIjw0rgXZpnBt',
+     *     { session_id: 'sesn_011CZkZAtmR3yMPDzynEDxu7' },
+     *   );
+     * ```
+     */
+    retrieve(threadID: string, params: ThreadRetrieveParams, options?: RequestOptions): APIPromise<BetaManagedAgentsSessionThread>;
+    /**
+     * List Session Threads
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const betaManagedAgentsSessionThread of client.beta.sessions.threads.list(
+     *   'sesn_011CZkZAtmR3yMPDzynEDxu7',
+     * )) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(sessionID: string, params?: ThreadListParams | null | undefined, options?: RequestOptions): PagePromise<BetaManagedAgentsSessionThreadsPageCursor, BetaManagedAgentsSessionThread>;
+    /**
+     * Archive Session Thread
+     *
+     * @example
+     * ```ts
+     * const betaManagedAgentsSessionThread =
+     *   await client.beta.sessions.threads.archive(
+     *     'sthr_011CZkZVWa6oIjw0rgXZpnBt',
+     *     { session_id: 'sesn_011CZkZAtmR3yMPDzynEDxu7' },
+     *   );
+     * ```
+     */
+    archive(threadID: string, params: ThreadArchiveParams, options?: RequestOptions): APIPromise<BetaManagedAgentsSessionThread>;
+}
+export type BetaManagedAgentsSessionThreadsPageCursor = PageCursor<BetaManagedAgentsSessionThread>;
+/**
+ * An execution thread within a `session`. Each session has one primary thread plus
+ * zero or more child threads spawned by the coordinator.
+ */
+export interface BetaManagedAgentsSessionThread {
+    /**
+     * Unique identifier for this thread.
+     */
+    id: string;
+    /**
+     * The resolved agent a session thread runs: a saved-agent snapshot, the platform
+     * advisor entry, or an inline-defined (ephemeral) agent snapshot.
+     */
+    agent: AgentsAPI.BetaManagedAgentsSessionThreadAgent | AgentsAPI.BetaManagedAgentsAdvisor;
+    /**
+     * A timestamp in RFC 3339 format
+     */
+    archived_at: string | null;
+    /**
+     * A timestamp in RFC 3339 format
+     */
+    created_at: string;
+    /**
+     * Parent thread that spawned this thread. Null for the primary thread.
+     */
+    parent_thread_id: string | null;
+    /**
+     * The session this thread belongs to.
+     */
+    session_id: string;
+    /**
+     * Timing statistics for a session thread.
+     */
+    stats: BetaManagedAgentsSessionThreadStats | null;
+    /**
+     * SessionThreadStatus enum
+     */
+    status: BetaManagedAgentsSessionThreadStatus;
+    type: 'session_thread';
+    /**
+     * A timestamp in RFC 3339 format
+     */
+    updated_at: string;
+    /**
+     * Cumulative token usage for a session thread across all turns.
+     */
+    usage: BetaManagedAgentsSessionThreadUsage | null;
+}
+/**
+ * Timing statistics for a session thread.
+ */
+export interface BetaManagedAgentsSessionThreadStats {
+    /**
+     * Cumulative time in seconds the thread spent actively running. Excludes idle
+     * time.
+     */
+    active_seconds?: number;
+    /**
+     * Elapsed time since thread creation in seconds. For archived threads, frozen at
+     * the final update.
+     */
+    duration_seconds?: number;
+    /**
+     * Time in seconds for the thread to begin running. Zero for child threads, which
+     * start immediately.
+     */
+    startup_seconds?: number;
+}
+/**
+ * SessionThreadStatus enum
+ */
+export type BetaManagedAgentsSessionThreadStatus = 'running' | 'idle' | 'rescheduling' | 'terminated';
+/**
+ * Cumulative token usage for a session thread across all turns.
+ */
+export interface BetaManagedAgentsSessionThreadUsage {
+    /**
+     * Cumulative time in seconds this thread spent in running status. Equal to
+     * `stats.active_seconds`; surfaced here so a thread's usage carries every quantity
+     * its cost is priced on.
+     */
+    active_seconds?: number;
+    /**
+     * Prompt-cache creation token usage broken down by cache lifetime.
+     */
+    cache_creation?: SessionsAPI.BetaManagedAgentsCacheCreationUsage;
+    /**
+     * Total tokens read from prompt cache.
+     */
+    cache_read_input_tokens?: number;
+    /**
+     * Total input tokens consumed across all turns.
+     */
+    input_tokens?: number;
+    /**
+     * A monetary amount in a specific currency.
+     */
+    list_cost?: BetaAPI.BetaMonetaryAmount | null;
+    /**
+     * Total output tokens generated across all turns.
+     */
+    output_tokens?: number;
+    /**
+     * Cumulative count of server-executed tool invocations, broken down by tool.
+     */
+    server_tool_use?: SessionsAPI.BetaManagedAgentsServerToolUsage | null;
+}
+/**
+ * Server-sent event in a single thread's stream.
+ */
+export type BetaManagedAgentsStreamSessionThreadEvents = EventsAPI.BetaManagedAgentsUserMessageEvent | EventsAPI.BetaManagedAgentsUserInterruptEvent | EventsAPI.BetaManagedAgentsUserToolConfirmationEvent | EventsAPI.BetaManagedAgentsUserCustomToolResultEvent | EventsAPI.BetaManagedAgentsAgentCustomToolUseEvent | EventsAPI.BetaManagedAgentsAgentMessageEvent | EventsAPI.BetaManagedAgentsAgentThinkingEvent | EventsAPI.BetaManagedAgentsAgentMCPToolUseEvent | EventsAPI.BetaManagedAgentsAgentMCPToolResultEvent | EventsAPI.BetaManagedAgentsAgentToolUseEvent | EventsAPI.BetaManagedAgentsAgentToolResultEvent | EventsAPI.BetaManagedAgentsAgentThreadMessageReceivedEvent | EventsAPI.BetaManagedAgentsAgentThreadMessageSentEvent | EventsAPI.BetaManagedAgentsAgentThreadContextCompactedEvent | EventsAPI.BetaManagedAgentsSessionErrorEvent | EventsAPI.BetaManagedAgentsSessionStatusRescheduledEvent | EventsAPI.BetaManagedAgentsSessionStatusRunningEvent | EventsAPI.BetaManagedAgentsSessionStatusIdleEvent | EventsAPI.BetaManagedAgentsSessionStatusTerminatedEvent | EventsAPI.BetaManagedAgentsSessionThreadCreatedEvent | EventsAPI.BetaManagedAgentsSpanOutcomeEvaluationStartEvent | EventsAPI.BetaManagedAgentsSpanOutcomeEvaluationEndEvent | EventsAPI.BetaManagedAgentsSpanModelRequestStartEvent | EventsAPI.BetaManagedAgentsSpanModelRequestEndEvent | EventsAPI.BetaManagedAgentsSpanOutcomeEvaluationOngoingEvent | EventsAPI.BetaManagedAgentsUserDefineOutcomeEvent | EventsAPI.BetaManagedAgentsSessionDeletedEvent | EventsAPI.BetaManagedAgentsSessionThreadStatusRunningEvent | EventsAPI.BetaManagedAgentsSessionThreadStatusIdleEvent | EventsAPI.BetaManagedAgentsSessionThreadStatusTerminatedEvent | SessionsAPI.BetaManagedAgentsUserToolResultEvent | EventsAPI.BetaManagedAgentsSessionThreadStatusRescheduledEvent | SessionsAPI.BetaManagedAgentsSessionUpdatedEvent | SessionsAPI.BetaManagedAgentsStartEvent | SessionsAPI.BetaManagedAgentsDeltaEvent | SessionsAPI.BetaManagedAgentsSystemMessageEvent | SessionsAPI.BetaManagedAgentsSessionUsageEvent;
+export interface ThreadRetrieveParams {
+    /**
+     * Path param: Path parameter session_id
+     */
+    session_id: string;
+    /**
+     * Header param: Optional header to specify the beta version(s) you want to use.
+     */
+    betas?: Array<BetaAPI.AnthropicBeta>;
+}
+export interface ThreadListParams extends PageCursorParams {
+    /**
+     * Header param: Optional header to specify the beta version(s) you want to use.
+     */
+    betas?: Array<BetaAPI.AnthropicBeta>;
+}
+export interface ThreadArchiveParams {
+    /**
+     * Path param: Path parameter session_id
+     */
+    session_id: string;
+    /**
+     * Header param: Optional header to specify the beta version(s) you want to use.
+     */
+    betas?: Array<BetaAPI.AnthropicBeta>;
+}
+export declare namespace Threads {
+    export { type BetaManagedAgentsSessionThread as BetaManagedAgentsSessionThread, type BetaManagedAgentsSessionThreadStats as BetaManagedAgentsSessionThreadStats, type BetaManagedAgentsSessionThreadStatus as BetaManagedAgentsSessionThreadStatus, type BetaManagedAgentsSessionThreadUsage as BetaManagedAgentsSessionThreadUsage, type BetaManagedAgentsStreamSessionThreadEvents as BetaManagedAgentsStreamSessionThreadEvents, type BetaManagedAgentsSessionThreadsPageCursor as BetaManagedAgentsSessionThreadsPageCursor, type ThreadRetrieveParams as ThreadRetrieveParams, type ThreadListParams as ThreadListParams, type ThreadArchiveParams as ThreadArchiveParams, };
+    export { Events as Events, type EventListParams as EventListParams, type EventStreamParams as EventStreamParams, };
+}
+//# sourceMappingURL=threads.d.mts.map

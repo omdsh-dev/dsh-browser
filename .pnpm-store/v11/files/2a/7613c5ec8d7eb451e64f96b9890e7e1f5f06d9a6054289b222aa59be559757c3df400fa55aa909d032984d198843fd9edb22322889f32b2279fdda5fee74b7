@@ -1,0 +1,173 @@
+import { APIResource } from "../core/resource.js";
+import * as CompletionsAPI from "./completions.js";
+import * as BetaAPI from "./beta/beta.js";
+import * as MessagesAPI from "./messages/messages.js";
+import { APIPromise } from "../core/api-promise.js";
+import { Stream } from "../core/streaming.js";
+import { RequestOptions } from "../internal/request-options.js";
+export declare class Completions extends APIResource {
+    /**
+     * [Legacy] Create a Text Completion.
+     *
+     * The Text Completions API is a legacy API. We recommend using the
+     * [Messages API](https://platform.claude.com/docs/en/api/messages) going forward.
+     *
+     * Future models and features will not be compatible with Text Completions. See our
+     * [migration guide](https://platform.claude.com/docs/en/build-with-claude/working-with-messages)
+     * for guidance in migrating from Text Completions to Messages.
+     *
+     * @example
+     * ```ts
+     * const completion = await client.completions.create({
+     *   max_tokens_to_sample: 256,
+     *   model: 'claude-2.1',
+     *   prompt: '\n\nHuman: Hello, world!\n\nAssistant:',
+     * });
+     * ```
+     */
+    create(params: CompletionCreateParamsNonStreaming, options?: RequestOptions): APIPromise<Completion>;
+    create(params: CompletionCreateParamsStreaming, options?: RequestOptions): APIPromise<Stream<Completion>>;
+    create(params: CompletionCreateParamsBase, options?: RequestOptions): APIPromise<Stream<Completion> | Completion>;
+}
+export interface Completion {
+    /**
+     * Unique object identifier.
+     *
+     * The format and length of IDs may change over time.
+     */
+    id: string;
+    /**
+     * The resulting completion up to and excluding the stop sequences.
+     */
+    completion: string;
+    /**
+     * The model that will complete your prompt.
+     *
+     * See [models](https://docs.anthropic.com/en/docs/models-overview) for additional
+     * details and options.
+     */
+    model: MessagesAPI.Model;
+    /**
+     * The reason that we stopped.
+     *
+     * This may be one the following values:
+     *
+     * - `"stop_sequence"`: we reached a stop sequence — either provided by you via the
+     *   `stop_sequences` parameter, or a stop sequence built into the model
+     * - `"max_tokens"`: we exceeded `max_tokens_to_sample` or the model's maximum
+     */
+    stop_reason: string | null;
+    /**
+     * Object type.
+     *
+     * For Text Completions, this is always `"completion"`.
+     */
+    type: 'completion';
+}
+export type CompletionCreateParams = CompletionCreateParamsNonStreaming | CompletionCreateParamsStreaming;
+export interface CompletionCreateParamsBase {
+    /**
+     * Body param: The maximum number of tokens to generate before stopping.
+     *
+     * Note that our models may stop _before_ reaching this maximum. This parameter
+     * only specifies the absolute maximum number of tokens to generate.
+     */
+    max_tokens_to_sample: number;
+    /**
+     * Body param: The model that will complete your prompt.
+     *
+     * See [models](https://docs.anthropic.com/en/docs/models-overview) for additional
+     * details and options.
+     */
+    model: MessagesAPI.Model;
+    /**
+     * Body param: The prompt that you want Claude to complete.
+     *
+     * For proper response generation you will need to format your prompt using
+     * alternating `\n\nHuman:` and `\n\nAssistant:` conversational turns. For example:
+     *
+     * ```
+     * "\n\nHuman: {userQuestion}\n\nAssistant:"
+     * ```
+     *
+     * See
+     * [prompt validation](https://platform.claude.com/docs/en/build-with-claude/working-with-messages)
+     * and our guide to
+     * [prompt design](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/overview)
+     * for more details.
+     */
+    prompt: string;
+    /**
+     * Body param: An object describing metadata about the request.
+     */
+    metadata?: MessagesAPI.Metadata;
+    /**
+     * Body param: Sequences that will cause the model to stop generating.
+     *
+     * Our models stop on `"\n\nHuman:"`, and may include additional built-in stop
+     * sequences in the future. By providing the stop_sequences parameter, you may
+     * include additional strings that will cause the model to stop generating.
+     */
+    stop_sequences?: Array<string>;
+    /**
+     * Body param: Whether to incrementally stream the response using server-sent
+     * events.
+     *
+     * See [streaming](https://platform.claude.com/docs/en/build-with-claude/streaming)
+     * for details.
+     */
+    stream?: boolean;
+    /**
+     * @deprecated Deprecated. Models released after Claude Opus 4.6 do not support
+     * setting temperature. A value of 1.0 of will be accepted for backwards
+     * compatibility, all other values will be rejected with a 400 error.
+     */
+    temperature?: number;
+    /**
+     * @deprecated Deprecated. Models released after Claude Opus 4.6 do not accept
+     * top_k; any value will be rejected with a 400 error.
+     */
+    top_k?: number;
+    /**
+     * @deprecated Deprecated. Models released after Claude Opus 4.6 do not support
+     * setting top_p. A value >= 0.99 will be accepted for backwards compatibility, all
+     * other values will be rejected with a 400 error.
+     */
+    top_p?: number;
+    /**
+     * Header param: Optional header to specify the beta version(s) you want to use.
+     */
+    betas?: Array<BetaAPI.AnthropicBeta>;
+}
+export declare namespace CompletionCreateParams {
+    /**
+     * @deprecated use `Anthropic.Messages.Metadata` instead
+     */
+    type Metadata = MessagesAPI.Metadata;
+    type CompletionCreateParamsNonStreaming = CompletionsAPI.CompletionCreateParamsNonStreaming;
+    type CompletionCreateParamsStreaming = CompletionsAPI.CompletionCreateParamsStreaming;
+}
+export interface CompletionCreateParamsNonStreaming extends CompletionCreateParamsBase {
+    /**
+     * Body param: Whether to incrementally stream the response using server-sent
+     * events.
+     *
+     * See [streaming](https://platform.claude.com/docs/en/build-with-claude/streaming)
+     * for details.
+     */
+    stream?: false;
+}
+export interface CompletionCreateParamsStreaming extends CompletionCreateParamsBase {
+    /**
+     * Body param: Whether to incrementally stream the response using server-sent
+     * events.
+     *
+     * See [streaming](https://platform.claude.com/docs/en/build-with-claude/streaming)
+     * for details.
+     */
+    stream: true;
+}
+export declare namespace Completions {
+    export { type Completion as Completion, type CompletionCreateParams as CompletionCreateParams, type CompletionCreateParamsNonStreaming as CompletionCreateParamsNonStreaming, type CompletionCreateParamsStreaming as CompletionCreateParamsStreaming, };
+}
+//# sourceMappingURL=completions.d.ts.map

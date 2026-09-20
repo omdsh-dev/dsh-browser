@@ -1,0 +1,25 @@
+{
+  "name": "@stablelib/base64",
+  "version": "1.0.1",
+  "description": "Base64 encoding and decoding",
+  "main": "./lib/base64.js",
+  "typings": "./lib/base64.d.ts",
+  "author": "Dmitry Chestnykh",
+  "license": "MIT",
+  "repository": {
+    "url": "https://github.com/StableLib/stablelib"
+  },
+  "homepage": "https://github.com/StableLib/stablelib/tree/master/packages/base64",
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "jasmine JASMINE_CONFIG_PATH=../../configs/jasmine.json",
+    "bench": "node ./lib/base64.bench.js"
+  },
+  "devDependencies": {
+    "@stablelib/benchmark": "^1.0.1"
+  },
+  "gitHead": "03dadf27703120d54e6be8436525228ee1c4299b"
+}

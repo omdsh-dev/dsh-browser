@@ -1,0 +1,42 @@
+{
+  "name": "fast-sha256",
+  "version": "1.3.0",
+  "description": "SHA-256, HMAC and PBKDF2 implementation with typed arrays for modern browsers and Node.js",
+  "main": "sha256.js",
+  "files": [
+    "sha256.js",
+    "sha256.min.js",
+    "sha256.d.ts"
+  ],
+  "typings": "sha256",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "build": "tsc && echo '});' | cat build/umd-prelude.js build/sha256.js - > sha256.js && rm build/sha256.js && uglifyjs sha256.js -c -m -o sha256.min.js && mv build/sha256.d.ts ./",
+    "test": "tape test/test.js | faucet",
+    "bench": "node test/bench.js",
+    "lint": "tslint src/*.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dchest/fast-sha256-js"
+  },
+  "keywords": [
+    "hash",
+    "sha256",
+    "pbkdf2",
+    "cryptography",
+    "crypto",
+    "hmac"
+  ],
+  "author": "Dmitry Chestnykh",
+  "license": "Unlicense",
+  "devDependencies": {
+    "faucet": "0.x.x",
+    "tape": "4.11.0",
+    "tslint": "^5.20.0",
+    "typescript": "^3.6.4",
+    "uglify-js": "^3.1.9"
+  }
+}

@@ -1,0 +1,11 @@
+export * from "./SSOClient";
+export * from "./SSO";
+export { ClientInputEndpointParameters } from "./endpoint/EndpointParameters";
+export { RuntimeExtension } from "./runtimeExtensions";
+export { SSOExtensionConfiguration } from "./extensionConfiguration";
+export * from "./commands";
+export { Command as $Command } from "@smithy/core/client";
+export * from "./schemas/schemas_0";
+export * from "./models/errors";
+export * from "./models/models_0";
+export { SSOServiceException } from "./models/SSOServiceException";

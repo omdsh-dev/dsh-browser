@@ -1,0 +1,16 @@
+import { type TArray } from '../../types/array.mjs';
+import { type TConstructor } from '../../types/constructor.mjs';
+import { type TFunction } from '../../types/function.mjs';
+import { type TIntersect } from '../../types/intersect.mjs';
+import { type TObject } from '../../types/object.mjs';
+import { type TProperties } from '../../types/properties.mjs';
+import { type TSchema } from '../../types/schema.mjs';
+import { type TTuple } from '../../types/tuple.mjs';
+import { type TThis } from '../../types/this.mjs';
+import { type TUnion } from '../../types/union.mjs';
+type TFromTypes<Properties extends TProperties, Types extends TSchema[], Result extends TSchema[] = []> = (Types extends [infer Left extends TSchema, ...infer Right extends TSchema[]] ? TFromTypes<Properties, Right, [...Result, TFromType<Properties, Left>]> : Result);
+export type TFromType<Properties extends TProperties, Type extends TSchema> = (Type extends TArray<infer Type extends TSchema> ? TArray<TFromType<Properties, Type>> : Type extends TConstructor<infer Parameters extends TSchema[], infer InstanceType extends TSchema> ? TConstructor<TFromTypes<Properties, Parameters>, TFromType<Properties, InstanceType>> : Type extends TFunction<infer Parameters extends TSchema[], infer ReturnType extends TSchema> ? TFunction<TFromTypes<Properties, Parameters>, TFromType<Properties, ReturnType>> : Type extends TTuple<infer Types extends TSchema[]> ? TTuple<TFromTypes<Properties, Types>> : Type extends TUnion<infer Types extends TSchema[]> ? TUnion<TFromTypes<Properties, Types>> : Type extends TIntersect<infer Types extends TSchema[]> ? TIntersect<TFromTypes<Properties, Types>> : Type extends TThis ? TObject<Properties> : Type);
+export declare function FromType<Properties extends TProperties, Type extends TSchema>(properties: Properties, type: Type): TFromType<Properties, Type>;
+export type TExpandThis<Properties extends TProperties, Type extends TSchema, Result extends TSchema = TFromType<Properties, Type>> = Result;
+export declare function ExpandThis<Properties extends TProperties, Type extends TSchema>(properties: TProperties, type: Type): TExpandThis<Properties, Type>;
+export {};

@@ -1,0 +1,19 @@
+{
+  "name": "@vscode/ripgrep-darwin-arm64",
+  "version": "1.18.0",
+  "description": "ripgrep binary for darwin-arm64. Used by @vscode/ripgrep.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/microsoft/vscode-ripgrep"
+  },
+  "license": "MIT",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin/"
+  ]
+}

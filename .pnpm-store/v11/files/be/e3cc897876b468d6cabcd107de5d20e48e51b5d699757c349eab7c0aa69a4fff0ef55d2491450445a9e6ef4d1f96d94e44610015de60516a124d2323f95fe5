@@ -1,0 +1,10 @@
+import { type TSchema, type TSchemaOptions } from '../../types/schema.mjs';
+import { type TProperties } from '../../types/properties.mjs';
+import { type TOptional } from '../../types/_optional.mjs';
+import { type TState, type TInstantiateType } from '../instantiate.mjs';
+type TAddOptionalOperation<Type extends TSchema, Result extends TSchema = `~optional` extends keyof Type ? Type : TOptional<Type>> = Result;
+export type TAddOptionalAction<Type extends TSchema, Result extends TSchema = TAddOptionalOperation<Type>> = Result;
+export declare function AddOptionalAction<Type extends TSchema>(type: Type, options: TSchemaOptions): TAddOptionalAction<Type>;
+export type TAddOptionalInstantiate<Context extends TProperties, State extends TState, Type extends TSchema, InstantiateType extends TSchema = TInstantiateType<Context, State, Type>> = TAddOptionalAction<InstantiateType>;
+export declare function AddOptionalInstantiate<Context extends TProperties, State extends TState, Type extends TSchema>(context: Context, state: State, type: Type, options: TSchemaOptions): TAddOptionalInstantiate<Context, State, Type>;
+export {};

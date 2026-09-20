@@ -1,0 +1,10 @@
+import { type TSchema, type TSchemaOptions } from '../../types/schema.mjs';
+import { type TProperties } from '../../types/properties.mjs';
+import { type TImmutable } from '../../types/_immutable.mjs';
+import { type TState, type TInstantiateType } from '../instantiate.mjs';
+type TAddImmutableOperation<Type extends TSchema, Result extends TSchema = '~immutable' extends keyof Type ? Type : TImmutable<Type>> = Result;
+export type TAddImmutableAction<Type extends TSchema, Result extends TSchema = TAddImmutableOperation<Type>> = Result;
+export declare function AddImmutableAction<Type extends TSchema>(type: Type, options: TSchemaOptions): TAddImmutableAction<Type>;
+export type TAddImmutableInstantiate<Context extends TProperties, State extends TState, Type extends TSchema, InstantiateType extends TSchema = TInstantiateType<Context, State, Type>> = TAddImmutableAction<InstantiateType>;
+export declare function AddImmutableInstantiate<Context extends TProperties, State extends TState, Type extends TSchema>(context: Context, state: State, type: Type, options: TSchemaOptions): TAddImmutableInstantiate<Context, State, Type>;
+export {};

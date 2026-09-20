@@ -1,0 +1,27 @@
+{
+    "compilerOptions": {
+        "target": "es5",
+        "module": "commonjs",
+        "strict": true,
+        "noUnusedParameters": true,
+        "noImplicitReturns": true,
+        "noUnusedLocals": true,
+        "removeComments": false,
+        "preserveConstEnums": true,
+        "moduleResolution": "node",
+        "newLine": "LF",
+        "sourceMap": true,
+        "declaration": true,
+        "outDir": "lib",
+        "lib": [
+            "es5",
+            "es2015.promise",
+            "dom",
+            "scripthost"
+        ]
+    },
+    "exclude": [
+        "node_modules",
+        "lib"
+    ]
+}
