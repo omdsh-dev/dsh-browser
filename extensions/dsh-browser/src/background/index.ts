@@ -70,6 +70,7 @@ import {
   type AffinityTab,
   type TabAffinityDecision,
 } from './tab-affinity.ts'
+import { bindOpenedTabAffinity } from './open-tab-binding.ts'
 import { FocusedWindowTracker } from './focused-window.ts'
 import { SelectionTracker, type SelectionSource } from './selection.ts'
 import { parsePageSelection, parseSelectionCapture } from '../selection.ts'
@@ -853,12 +854,18 @@ async function resolveOpenTabWindow(sessionId?: string): Promise<{ windowId: num
   return affinityFailure('missing')
 }
 
-function bindOpenedTab(tab: chrome.tabs.Tab, sessionId?: string): boolean {
+function bindOpenedTab(
+  tab: chrome.tabs.Tab,
+  sessionId?: string,
+  options: { active?: boolean } = {},
+): boolean {
   const summary = summarizeTab(tab)
   if (summary === null) return false
   const sid = sessionId?.trim()
-  if (sid !== undefined && sid !== '') tabAffinity.rebindActive(summary, sid)
-  else tabAffinity.rebindActive(summary)
+  bindOpenedTabAffinity(tabAffinity, summary, {
+    active: options.active,
+    sessionId: sid,
+  })
   if (sid !== undefined && sid !== '') {
     void pageSessionContexts.ready.then(() => {
       pageSessionContexts.bind(sid, { id: summary.tabId, ...summary })
@@ -1119,7 +1126,7 @@ function routeToolCall(call: ToolCall): void {
           budget,
           (prompt) => authorizeToolCall(prompt, controller.signal, target.windowId, call.sessionId, unrestrictedAccess),
           controller.signal,
-          (tab) => bindOpenedTab(tab, call.sessionId),
+          (tab) => bindOpenedTab(tab, call.sessionId, { active: call.args.active !== false }),
           (tabId) => tabAffinity.allowsTarget(tabId, call.sessionId),
           commitAction,
         ))

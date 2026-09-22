@@ -877,6 +877,7 @@ export async function dispatchOpenTab(
   if (parsed === undefined) {
     return { ok: false, error: { code: 'action-failed', message: 'url must be a complete http or https URL.' } }
   }
+  const active = call.args.active !== false
 
   const approval = approvalPromptForCall(call, sharePageContent, [])
   if (approval !== undefined) {
@@ -888,7 +889,7 @@ export async function dispatchOpenTab(
   let created: chrome.tabs.Tab
   try {
     // No URL yet: register the readiness wait before the http(s) navigation.
-    created = await chrome.tabs.create({ active: true, windowId })
+    created = await chrome.tabs.create({ active, windowId })
   } catch (error: unknown) {
     return {
       ok: false,
@@ -940,7 +941,9 @@ export async function dispatchOpenTab(
   resetTabSnapshot(tabId)
   if (!targetStillAllowed(tabId)) return targetChanged()
 
-  const status = `Opened a new tab at ${parsed.href}.`
+  const status = active
+    ? `Opened a new tab at ${parsed.href}.`
+    : `Opened a new background tab at ${parsed.href}.`
   if (!ready || sharePageContent === 'off' || isCancelled(call, signal)) {
     return {
       ok: true,
