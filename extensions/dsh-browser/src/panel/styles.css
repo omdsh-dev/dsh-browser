@@ -1120,6 +1120,7 @@ textarea:focus-visible {
   font-family: "Avenir Next", "Segoe UI Variable Display", sans-serif;
   font-size: calc(16px * var(--ui-scale));
   font-weight: 760;
+  line-height: 1;
 }
 
 .question-heading > div {
@@ -1143,20 +1144,38 @@ textarea:focus-visible {
 }
 
 .question-item {
+  /* A visible legend is painted on the fieldset border and ignores padding,
+     so the prompt hugs the top edge and no longer lines up with the options.
+     Keep the legend for the accessible name, and lay the prompt out in flow. */
+  display: flex;
   min-width: 0;
+  min-inline-size: 0;
+  flex-direction: column;
   margin: 0;
-  padding: 11px;
+  padding: 12px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--canvas);
 }
 
 .question-item legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.question-prompt {
   display: flex;
   width: 100%;
   min-width: 0;
   gap: 8px;
-  padding: 0 0 9px;
+  margin: 0 0 10px;
 }
 
 .question-index {
@@ -1212,9 +1231,9 @@ textarea:focus-visible {
 .question-option {
   display: flex;
   min-width: 0;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
-  padding: 8px 9px;
+  padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--surface);
@@ -1234,7 +1253,7 @@ textarea:focus-visible {
 
 .question-option input {
   flex: 0 0 auto;
-  margin: 2px 0 0;
+  margin: 0;
   accent-color: var(--blue);
 }
 
@@ -1242,7 +1261,7 @@ textarea:focus-visible {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 1px;
+  gap: 3px;
 }
 
 .question-option strong {
