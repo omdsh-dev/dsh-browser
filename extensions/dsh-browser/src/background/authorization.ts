@@ -151,11 +151,20 @@ function summarizeAction(call: ToolCall, locale: UiLocale): string {
       `Navigate to ${displayUrl(typeof call.args.url === 'string' ? call.args.url : '', locale)}`,
       `导航到 ${displayUrl(typeof call.args.url === 'string' ? call.args.url : '', locale)}`,
     )
-    case 'browser_open_tab': return localized(
-      locale,
-      `Open a new tab at ${displayUrl(typeof call.args.url === 'string' ? call.args.url : '', locale)}`,
-      `在新标签页打开 ${displayUrl(typeof call.args.url === 'string' ? call.args.url : '', locale)}`,
-    )
+    case 'browser_open_tab': {
+      const destination = displayUrl(typeof call.args.url === 'string' ? call.args.url : '', locale)
+      return call.args.active === false
+        ? localized(
+          locale,
+          `Open a background tab at ${destination}`,
+          `在后台新标签页打开 ${destination}`,
+        )
+        : localized(
+          locale,
+          `Open a new tab at ${destination}`,
+          `在新标签页打开 ${destination}`,
+        )
+    }
     case 'browser_back': return localized(locale, 'Go back in browser history (destination domain unknown)', '返回浏览历史上一页（目标域名未知）')
     case 'browser_forward': return localized(locale, 'Go forward in browser history (destination domain unknown)', '前进到浏览历史下一页（目标域名未知）')
     case 'browser_reload': return localized(locale, 'Reload the current page', '重新加载当前页面')

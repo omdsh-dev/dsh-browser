@@ -428,13 +428,23 @@ function defineTools(call: Call, options: BrowserToolsOptions): ToolDefinition[]
 
   const openTab = (): ToolDefinition => defineTool({
     name: 'browser_open_tab',
-    description: 'Open an HTTP(S) URL in a new browser tab and make that tab the controlled target for later browser tools.',
+    description: 'Open an HTTP(S) URL in a new tab and make it the controlled target. Activates the tab by default; set active:false to keep the current visible tab in front.',
     parameters: {
       url: { type: 'string', required: true, description: 'Complete http or https URL.' },
+      active: {
+        type: 'boolean',
+        description: 'Bring the new tab to the front. Defaults to true; set false to open in the background.',
+      },
     },
     timeoutMs: options.toolTimeoutMs,
     output: TEXT_OUTPUT,
-    execute: (args, exec) => call(exec, 'browser_open_tab', args as Record<string, unknown>),
+    execute: (args, exec) => {
+      const a = args as { url: string; active?: boolean }
+      return call(exec, 'browser_open_tab', {
+        url: a.url,
+        ...a.active !== undefined ? { active: a.active } : {},
+      })
+    },
   })
 
   const listTabs = (): ToolDefinition => defineTool({

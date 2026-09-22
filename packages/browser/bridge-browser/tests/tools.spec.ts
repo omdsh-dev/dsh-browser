@@ -115,6 +115,13 @@ describe('registerBrowserTools', () => {
     expect(requestTool).toHaveBeenLastCalledWith('browser_navigate', { url: 'https://example.com' }, exec.signal, 1_000)
     await run('browser_open_tab', { url: 'https://example.com/new' })
     expect(requestTool).toHaveBeenLastCalledWith('browser_open_tab', { url: 'https://example.com/new' }, exec.signal, 1_000)
+    await run('browser_open_tab', { url: 'https://example.com/bg', active: false })
+    expect(requestTool).toHaveBeenLastCalledWith(
+      'browser_open_tab',
+      { url: 'https://example.com/bg', active: false },
+      exec.signal,
+      1_000,
+    )
 
     await run('browser_list_tabs', {})
     expect(requestTool).toHaveBeenLastCalledWith('browser_list_tabs', {}, exec.signal, 1_000)

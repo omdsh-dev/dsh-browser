@@ -56,7 +56,7 @@ The paired Playwright / extension duration ratio was **1.24** (95% CI **1.16–1
 | Upload file | `browser_upload` | Host reads an absolute local path (size/extension limits) into `input[type=file]`; requires approval |
 | Press keys | `browser_press` | Sends a key to the focused element (Enter, Escape, arrows, Backspace, Delete). Does not move focus via Tab, does not produce IME text, and does not synthesize form submit while a picker/dropdown overlay is open |
 | Scroll | `browser_scroll` | Viewport scrolling: up, down, top, and bottom |
-| Navigate | `browser_navigate` / `browser_open_tab` / `browser_back` / `browser_forward` / `browser_reload` | Navigation inside the controlled tab, or open a URL in a new tab and follow it |
+| Navigate | `browser_navigate` / `browser_open_tab` / `browser_back` / `browser_forward` / `browser_reload` | Navigation inside the controlled tab, or open a URL in a new tab and follow it (`active:false` keeps the current tab in front) |
 | List tabs | `browser_list_tabs` | List accessible tabs with stable IDs, titles, URLs, window/index metadata, and active/controlled state |
 | Follow tab | `browser_follow_tab` | Bind later browser tools to a tab returned by `browser_list_tabs` without activating it |
 | Close tab | `browser_close_tab` | Close a tab returned by `browser_list_tabs` |
