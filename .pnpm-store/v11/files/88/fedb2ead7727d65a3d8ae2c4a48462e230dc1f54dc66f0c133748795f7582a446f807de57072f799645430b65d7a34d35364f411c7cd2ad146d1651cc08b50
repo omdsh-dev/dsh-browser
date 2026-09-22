@@ -1,0 +1,28 @@
+{
+  "name": "node-addon-require-builtin-darwin-arm64",
+  "version": "0.1.5",
+  "description": "Prebuilt darwin-arm64 native addon package for node-addon-require-builtin.",
+  "main": "./index.js",
+  "publishConfig": {
+    "access": "public"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "index.js",
+    "README.md",
+    "prebuilds.json",
+    "prebuilt/"
+  ],
+  "dependencies": {
+    "node-addon-native-custom-loader": "0.1.5"
+  },
+  "license": "MIT"
+}

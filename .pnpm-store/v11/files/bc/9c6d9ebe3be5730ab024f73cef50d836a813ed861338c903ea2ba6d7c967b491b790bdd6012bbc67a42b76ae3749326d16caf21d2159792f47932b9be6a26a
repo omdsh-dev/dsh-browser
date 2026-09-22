@@ -1,0 +1,24 @@
+export { toEndpointV1 } from "@smithy/core/transport";
+export { BinaryDecisionDiagram } from "./util-endpoints/bdd/BinaryDecisionDiagram";
+export { EndpointCache } from "./util-endpoints/cache/EndpointCache";
+export { decideEndpoint } from "./util-endpoints/decideEndpoint";
+export { isIpAddress } from "./util-endpoints/lib/isIpAddress";
+export { isValidHostLabel } from "@smithy/core/transport";
+export { customEndpointFunctions } from "./util-endpoints/utils/customEndpointFunctions";
+export { resolveEndpoint } from "./util-endpoints/resolveEndpoint";
+export { EndpointError } from "./util-endpoints/types";
+export type { ConditionObject, DeprecatedObject, EndpointFunctions, EndpointObject, EndpointObjectHeaders, EndpointObjectProperties, EndpointParams, EndpointResolverOptions, EndpointRuleObject, ErrorRuleObject, EvaluateOptions, Expression, FunctionArgv, FunctionObject, FunctionReturn, ParameterObject, ReferenceObject, ReferenceRecord, RuleSetObject, RuleSetRules, TreeRuleObject, } from "./util-endpoints/types";
+export declare const getEndpointFromInstructions: <T extends import("@smithy/types").EndpointParameters, CommandInput extends object, Config extends object>(commandInput: CommandInput, instructionsSupplier: import("./middleware-endpoint/adaptors/getEndpointFromInstructions").EndpointParameterInstructionsSupplier, clientConfig: Partial<import("./middleware-endpoint/resolveEndpointConfig").EndpointResolvedConfig<T>> & Config, context?: import("@smithy/types").HandlerExecutionContext) => Promise<import("@smithy/types").EndpointV2>;
+export declare const resolveEndpointConfig: <T, P extends import("@smithy/types").EndpointParameters = import("@smithy/types").EndpointParameters>(input: T & import("./middleware-endpoint/resolveEndpointConfig").EndpointInputConfig<P> & import("./middleware-endpoint/resolveEndpointConfig").PreviouslyResolved<P>) => T & import("./middleware-endpoint/resolveEndpointConfig").EndpointResolvedConfig<P>;
+export declare const endpointMiddleware: <T extends import("@smithy/types").EndpointParameters>({ config, instructions, }: {
+    config: import("./middleware-endpoint/resolveEndpointConfig").EndpointResolvedConfig<T>;
+    instructions: import("@smithy/types").EndpointParameterInstructions;
+}) => import("@smithy/types").SerializeMiddleware<any, any>;
+export declare const getEndpointPlugin: <T extends import("@smithy/types").EndpointParameters>(config: import("./middleware-endpoint/resolveEndpointConfig").EndpointResolvedConfig<T>, instructions: import("@smithy/types").EndpointParameterInstructions) => import("@smithy/types").Pluggable<any, any>;
+export { resolveParams, type EndpointParameterInstructionsSupplier, } from "./middleware-endpoint/adaptors/getEndpointFromInstructions";
+export { toEndpointV1 as middlewareEndpointToEndpointV1 } from "./middleware-endpoint/adaptors/toEndpointV1";
+export { endpointMiddlewareOptions } from "./middleware-endpoint/getEndpointPlugin";
+export type { EndpointInputConfig, EndpointResolvedConfig } from "./middleware-endpoint/resolveEndpointConfig";
+export { resolveEndpointRequiredConfig } from "./middleware-endpoint/resolveEndpointRequiredConfig";
+export type { EndpointRequiredInputConfig, EndpointRequiredResolvedConfig, } from "./middleware-endpoint/resolveEndpointRequiredConfig";
+export type { EndpointParameterInstructions, BuiltInParamInstruction, ClientContextParamInstruction, ContextParamInstruction, OperationContextParamInstruction, StaticContextParamInstruction, } from "@smithy/types";

@@ -1,0 +1,13 @@
+import { type TSchema } from '../types/schema.mjs';
+import { type TProperties } from '../types/properties.mjs';
+import { type TAny } from '../types/any.mjs';
+import { type TUnknown } from '../types/unknown.mjs';
+import { type TObject } from '../types/object.mjs';
+import { type TRecordPatternToType, type TRecord } from '../types/record.mjs';
+import { type TExtendsLeft } from './extends_left.mjs';
+import * as Result from './result.mjs';
+export type TFromObject<Inferred extends TProperties, Properties extends TProperties> = keyof Properties extends never ? Result.TExtendsTrue<Inferred> : Result.TExtendsFalse;
+type TFromRecord<Inferred extends TProperties, _LeftKey extends TSchema, LeftValue extends TSchema, _RightKey extends TSchema, RightValue extends TSchema> = (TExtendsLeft<Inferred, LeftValue, RightValue>);
+export type TExtendsRecord<Inferred extends TProperties, LeftPattern extends string, LeftValue extends TSchema, Right extends TSchema> = (Right extends TRecord<infer Pattern extends string, infer Value extends TSchema> ? TFromRecord<Inferred, TRecordPatternToType<LeftPattern>, LeftValue, TRecordPatternToType<Pattern>, Value> : Right extends TObject<infer Properties extends TProperties> ? TFromObject<Inferred, Properties> : Right extends TAny ? Result.TExtendsTrue<Inferred> : Right extends TUnknown ? Result.TExtendsTrue<Inferred> : Result.TExtendsFalse);
+export declare function ExtendsRecord<Inferred extends TProperties, Pattern extends string, Value extends TSchema, Right extends TSchema>(inferred: Inferred, leftPattern: Pattern, leftValue: Value, right: Right): TExtendsRecord<Inferred, Pattern, Value, Right>;
+export {};

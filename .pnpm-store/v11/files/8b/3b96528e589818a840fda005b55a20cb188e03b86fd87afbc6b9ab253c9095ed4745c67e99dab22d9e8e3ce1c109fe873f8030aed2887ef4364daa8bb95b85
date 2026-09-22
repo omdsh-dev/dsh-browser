@@ -1,0 +1,77 @@
+"use strict";
+// File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.Beta = void 0;
+const tslib_1 = require("../../internal/tslib.js");
+const resource_1 = require("../../core/resource.js");
+const DeploymentRunsAPI = tslib_1.__importStar(require("./deployment-runs.js"));
+const deployment_runs_1 = require("./deployment-runs.js");
+const DeploymentsAPI = tslib_1.__importStar(require("./deployments.js"));
+const deployments_1 = require("./deployments.js");
+const DreamsAPI = tslib_1.__importStar(require("./dreams.js"));
+const dreams_1 = require("./dreams.js");
+const FilesAPI = tslib_1.__importStar(require("./files.js"));
+const files_1 = require("./files.js");
+const ModelsAPI = tslib_1.__importStar(require("./models.js"));
+const models_1 = require("./models.js");
+const UserProfilesAPI = tslib_1.__importStar(require("./user-profiles.js"));
+const user_profiles_1 = require("./user-profiles.js");
+const WebhooksAPI = tslib_1.__importStar(require("./webhooks.js"));
+const webhooks_1 = require("./webhooks.js");
+const AgentsAPI = tslib_1.__importStar(require("./agents/agents.js"));
+const agents_1 = require("./agents/agents.js");
+const EnvironmentsAPI = tslib_1.__importStar(require("./environments/environments.js"));
+const environments_1 = require("./environments/environments.js");
+const MemoryStoresAPI = tslib_1.__importStar(require("./memory-stores/memory-stores.js"));
+const memory_stores_1 = require("./memory-stores/memory-stores.js");
+const MessagesAPI = tslib_1.__importStar(require("./messages/messages.js"));
+const messages_1 = require("./messages/messages.js");
+const OrganizationAPI = tslib_1.__importStar(require("./organization/organization.js"));
+const organization_1 = require("./organization/organization.js");
+const SessionsAPI = tslib_1.__importStar(require("./sessions/sessions.js"));
+const sessions_1 = require("./sessions/sessions.js");
+const SkillsAPI = tslib_1.__importStar(require("./skills/skills.js"));
+const skills_1 = require("./skills/skills.js");
+const TunnelsAPI = tslib_1.__importStar(require("./tunnels/tunnels.js"));
+const tunnels_1 = require("./tunnels/tunnels.js");
+const VaultsAPI = tslib_1.__importStar(require("./vaults/vaults.js"));
+const vaults_1 = require("./vaults/vaults.js");
+class Beta extends resource_1.APIResource {
+    constructor() {
+        super(...arguments);
+        this.models = new ModelsAPI.Models(this._client);
+        this.messages = new MessagesAPI.Messages(this._client);
+        this.agents = new AgentsAPI.Agents(this._client);
+        this.environments = new EnvironmentsAPI.Environments(this._client);
+        this.sessions = new SessionsAPI.Sessions(this._client);
+        this.deployments = new DeploymentsAPI.Deployments(this._client);
+        this.deploymentRuns = new DeploymentRunsAPI.DeploymentRuns(this._client);
+        this.vaults = new VaultsAPI.Vaults(this._client);
+        this.memoryStores = new MemoryStoresAPI.MemoryStores(this._client);
+        this.files = new FilesAPI.Files(this._client);
+        this.skills = new SkillsAPI.Skills(this._client);
+        this.webhooks = new WebhooksAPI.Webhooks(this._client);
+        this.userProfiles = new UserProfilesAPI.UserProfiles(this._client);
+        this.dreams = new DreamsAPI.Dreams(this._client);
+        this.tunnels = new TunnelsAPI.Tunnels(this._client);
+        this.organization = new OrganizationAPI.Organization(this._client);
+    }
+}
+exports.Beta = Beta;
+Beta.Models = models_1.Models;
+Beta.Messages = messages_1.Messages;
+Beta.Agents = agents_1.Agents;
+Beta.Environments = environments_1.Environments;
+Beta.Sessions = sessions_1.Sessions;
+Beta.Deployments = deployments_1.Deployments;
+Beta.DeploymentRuns = deployment_runs_1.DeploymentRuns;
+Beta.Vaults = vaults_1.Vaults;
+Beta.MemoryStores = memory_stores_1.MemoryStores;
+Beta.Files = files_1.Files;
+Beta.Skills = skills_1.Skills;
+Beta.Webhooks = webhooks_1.Webhooks;
+Beta.UserProfiles = user_profiles_1.UserProfiles;
+Beta.Dreams = dreams_1.Dreams;
+Beta.Tunnels = tunnels_1.Tunnels;
+Beta.Organization = organization_1.Organization;
+//# sourceMappingURL=beta.js.map

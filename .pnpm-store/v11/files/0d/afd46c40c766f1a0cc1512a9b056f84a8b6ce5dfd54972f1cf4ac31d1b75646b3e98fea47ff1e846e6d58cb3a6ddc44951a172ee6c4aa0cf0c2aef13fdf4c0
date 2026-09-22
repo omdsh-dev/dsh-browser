@@ -1,0 +1,10 @@
+import { type TSchema, type TSchemaOptions } from '../../types/schema.mjs';
+import { type TProperties } from '../../types/properties.mjs';
+import { type TReadonly } from '../../types/_readonly.mjs';
+import { type TState, type TInstantiateType } from '../instantiate.mjs';
+type TRemoveReadonlyOperation<Type extends TSchema, Result extends TSchema = Type extends TReadonly<infer Type extends TSchema> ? TRemoveReadonlyOperation<Type> : Type> = Result;
+export type TRemoveReadonlyAction<Type extends TSchema, Result extends TSchema = TRemoveReadonlyOperation<Type>> = Result;
+export declare function RemoveReadonlyAction<Type extends TSchema>(type: Type, options: TSchemaOptions): TRemoveReadonlyAction<Type>;
+export type TRemoveReadonlyInstantiate<Context extends TProperties, State extends TState, Type extends TSchema, InstantiateType extends TSchema = TInstantiateType<Context, State, Type>> = TRemoveReadonlyAction<InstantiateType>;
+export declare function RemoveReadonlyInstantiate<Context extends TProperties, State extends TState, Type extends TSchema>(context: Context, state: State, type: Type, options: TSchemaOptions): TRemoveReadonlyInstantiate<Context, State, Type>;
+export {};

@@ -1,0 +1,3 @@
+export { Rules, type BetaFederationRule, type BetaFederationRuleMatch, type BetaFederationRuleWorkspace, type BetaServiceAccountTarget, type RuleCreateParams, type RuleRetrieveParams, type RuleUpdateParams, type RuleListParams, type RuleArchiveParams, type BetaFederationRuleWorkspacesPageCursor, type BetaFederationRulesPageCursor, } from "./rules.js";
+export { Workspaces, type WorkspaceRemoveResponse, type WorkspaceListParams, type WorkspaceAddParams, type WorkspaceRemoveParams, } from "./workspaces.js";
+//# sourceMappingURL=index.d.ts.map

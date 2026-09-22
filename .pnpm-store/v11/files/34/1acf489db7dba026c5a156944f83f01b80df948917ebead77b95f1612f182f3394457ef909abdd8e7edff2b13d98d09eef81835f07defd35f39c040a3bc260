@@ -1,0 +1,10 @@
+import { type TSchema } from '../../types/schema.mjs';
+import { type TUnion } from '../../types/union.mjs';
+import { type TExtends, ExtendsResult } from '../../extends/index.mjs';
+import { type TEvaluateType } from '../evaluate/evaluate.mjs';
+import { type TEvaluateUnion } from '../evaluate/evaluate.mjs';
+type TExcludeType<Left extends TSchema, Right extends TSchema, Check extends ExtendsResult.TResult = TExtends<{}, Left, Right>, Result extends TSchema[] = Check extends ExtendsResult.TExtendsTrueLike ? [] : [Left]> = Result;
+type TExcludeUnion<Left extends TSchema[], Right extends TSchema, Result extends TSchema[] = []> = (Left extends [infer Head extends TSchema, ...infer Tail extends TSchema[]] ? TExcludeUnion<Tail, Right, [...Result, ...TExcludeType<Head, Right>]> : Result);
+export type TExcludeOperation<Left extends TSchema, Right extends TSchema, Evaluated extends TSchema = TEvaluateType<Left>, Canonical extends TSchema[] = Evaluated extends TUnion<infer Types extends TSchema[]> ? Types : [Evaluated], Remaining extends TSchema[] = TExcludeUnion<Canonical, Right>, Result extends TSchema = TEvaluateUnion<Remaining>> = Result;
+export declare function ExcludeOperation<Left extends TSchema, Right extends TSchema>(left: Left, right: Right): TExcludeOperation<Left, Right>;
+export {};

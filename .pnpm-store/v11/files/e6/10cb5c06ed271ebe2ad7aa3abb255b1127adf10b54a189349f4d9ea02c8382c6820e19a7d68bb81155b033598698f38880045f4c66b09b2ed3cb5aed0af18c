@@ -1,0 +1,24 @@
+{
+    "name": "@koromix/koffi-darwin-arm64",
+    "version": "3.1.5",
+    "description": "Fast and easy-to-use dynamic C FFI (foreign function interface) for Node.js (@koromix/koffi-darwin-arm64)",
+    "author": {
+        "name": "Niels Martignène",
+        "email": "niels.martignene@protonmail.com",
+        "url": "https://koromix.dev/"
+    },
+    "homepage": "https://koffi.dev/",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/Koromix/koffi"
+    },
+    "license": "MIT",
+    "funding": "https://liberapay.com/Koromix",
+    "main": "./index.js",
+    "os": [
+        "darwin"
+    ],
+    "cpu": [
+        "arm64"
+    ]
+}

@@ -1,0 +1,265 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.WorkloadIdentityError = exports.ADVISORY_REFRESH_BACKOFF_IN_SECONDS = exports.MANDATORY_REFRESH_THRESHOLD_IN_SECONDS = exports.ADVISORY_REFRESH_THRESHOLD_IN_SECONDS = exports.FEDERATION_BETA_HEADER = exports.OAUTH_API_BETA_HEADER = exports.TOKEN_ENDPOINT = exports.GRANT_TYPE_REFRESH_TOKEN = exports.GRANT_TYPE_JWT_BEARER = void 0;
+exports.requireSecureTokenEndpoint = requireSecureTokenEndpoint;
+exports.parseTokenResponse = parseTokenResponse;
+exports.redactSensitive = redactSensitive;
+exports.checkCredentialsFileSafety = checkCredentialsFileSafety;
+exports.writeCredentialsFileAtomic = writeCredentialsFileAtomic;
+const error_1 = require("../../core/error.js");
+exports.GRANT_TYPE_JWT_BEARER = 'urn:ietf:params:oauth:grant-type:jwt-bearer';
+exports.GRANT_TYPE_REFRESH_TOKEN = 'refresh_token';
+exports.TOKEN_ENDPOINT = '/v1/oauth/token';
+/**
+ * `anthropic-beta` value required on authenticated API requests using an
+ * OAuth bearer token, and on `refresh_token` grants against the token endpoint.
+ */
+exports.OAUTH_API_BETA_HEADER = 'oauth-2025-04-20';
+/**
+ * `anthropic-beta` value required on jwt-bearer exchanges against the token
+ * endpoint. It routes the request to the federation service; it must NOT be
+ * sent on `refresh_token` grants, which are handled by a different backend.
+ */
+exports.FEDERATION_BETA_HEADER = 'oidc-federation-2026-04-01';
+exports.ADVISORY_REFRESH_THRESHOLD_IN_SECONDS = 120;
+exports.MANDATORY_REFRESH_THRESHOLD_IN_SECONDS = 30;
+exports.ADVISORY_REFRESH_BACKOFF_IN_SECONDS = 5;
+const MAX_TOKEN_RESPONSE_BYTES = 1 << 20;
+/**
+ * Rejects base URLs that would cause a JWT assertion or refresh token to be
+ * sent over cleartext HTTP. Loopback hosts are allowed for local development.
+ */
+function requireSecureTokenEndpoint(baseURL) {
+    if (!baseURL)
+        return;
+    let u;
+    try {
+        u = new URL(baseURL);
+    }
+    catch (err) {
+        throw new WorkloadIdentityError(`Invalid token endpoint base URL "${baseURL}": ${err}`);
+    }
+    if (u.protocol === 'https:')
+        return;
+    // WHATWG URL.hostname returns bracketed IPv6 ("[::1]"); Go's net/url strips them.
+    const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    if (u.protocol === 'http:' && (host === 'localhost' || host === '127.0.0.1' || host === '::1')) {
+        return;
+    }
+    throw new WorkloadIdentityError(`Refusing to send credential over non-https token endpoint "${baseURL}"`);
+}
+/**
+ * Reads the response body as text, parses it as a token-endpoint JSON
+ * response, validates `access_token` is present, and rejects a non-Bearer
+ * `token_type` when one is provided. Reads at most
+ * {@link MAX_TOKEN_RESPONSE_BYTES} from the body stream.
+ */
+async function parseTokenResponse(resp, requestId) {
+    const text = await readLimitedText(resp);
+    let data;
+    try {
+        data = JSON.parse(text);
+    }
+    catch {
+        throw new WorkloadIdentityError(`Token endpoint returned non-JSON response (status ${resp.status})`, resp.status, redactSensitive(text), requestId);
+    }
+    if (!data.access_token) {
+        throw new WorkloadIdentityError(`Token endpoint response missing access_token: ${JSON.stringify(redactSensitive(data))}`, resp.status, redactSensitive(data), requestId);
+    }
+    if (data.token_type && data.token_type.toLowerCase() !== 'bearer') {
+        throw new WorkloadIdentityError(`Token endpoint response: unsupported token_type "${data.token_type}" (want Bearer)`, resp.status, redactSensitive(data), requestId);
+    }
+    return data;
+}
+const MAX_ERROR_BODY_CHARS = 2000;
+// RFC 6749 §5.2 standard error-response fields. Anything else in a token
+// endpoint error body is potentially echoed input (assertion, refresh_token,
+// access_token, …) and is dropped rather than allowlisted-with-exceptions.
+const SAFE_ERROR_KEYS = new Set(['error', 'error_description', 'error_uri']);
+/**
+ * Returns a redacted copy of a token-endpoint error body for safe inclusion
+ * in an exception. Strings are truncated; objects keep only the RFC 6749
+ * §5.2 error fields.
+ */
+function redactSensitive(body) {
+    if (body == null)
+        return body;
+    if (typeof body === 'string') {
+        let parsed;
+        try {
+            parsed = JSON.parse(body);
+        }
+        catch {
+            if (body.length <= MAX_ERROR_BODY_CHARS)
+                return body;
+            return body.slice(0, MAX_ERROR_BODY_CHARS) + `... <${body.length - MAX_ERROR_BODY_CHARS} more chars>`;
+        }
+        return JSON.stringify(redactSensitive(parsed));
+    }
+    if (typeof body === 'object' && !Array.isArray(body)) {
+        const out = {};
+        for (const [k, v] of Object.entries(body)) {
+            if (SAFE_ERROR_KEYS.has(k))
+                out[k] = v;
+        }
+        return out;
+    }
+    return null;
+}
+/**
+ * Best-effort safety check on a credentials file before reading it.
+ *
+ * On POSIX: resolves symlinks (so containerized deployments that mount the
+ * credential as a symlink to a tmpfs-backed file keep working), then rejects
+ * the resolved target if it is group- or world- readable or writable. A uid
+ * mismatch on the resolved target is surfaced via `onWarn` since
+ * root-written/app-read is common in init-container setups. No-op on Windows.
+ */
+async function checkCredentialsFileSafety(path, onWarn = (m) => console.warn(`anthropic-sdk: ${m}`)) {
+    if (typeof process === 'undefined' || process.platform === 'win32')
+        return;
+    const { fs } = await Promise.resolve().then(() => __importStar(require("../../internal/node.js")));
+    let resolved = path;
+    let st;
+    try {
+        resolved = await fs.promises.realpath(path);
+        st = await fs.promises.stat(resolved);
+    }
+    catch {
+        return; // ENOENT etc — let the subsequent read surface a precise error
+    }
+    const mode = st.mode & 0o777;
+    // 0o022 = group/world write; 0o044 = group/world read.
+    if (mode & 0o022) {
+        throw new WorkloadIdentityError(`Credentials file at ${resolved} is group/world-writable (mode 0o${mode.toString(8)}); ` +
+            `this allows other local users to plant tokens. Run \`chmod 600 ${resolved}\`.`);
+    }
+    if (mode & 0o044) {
+        throw new WorkloadIdentityError(`Credentials file at ${resolved} is group/world-readable (mode 0o${mode.toString(8)}); ` +
+            `run \`chmod 600 ${resolved}\` before retrying.`);
+    }
+    if (typeof process.getuid === 'function' && st.uid !== process.getuid()) {
+        onWarn(`credentials file at ${resolved} is owned by uid ${st.uid} (current process uid ${process.getuid()}); ` + `verify this is intentional.`);
+    }
+}
+/**
+ * Atomically writes JSON to `targetPath` via a `.tmp` sibling + rename,
+ * with fsync on the file and (best-effort) on the parent directory.
+ * Creates the parent directory with mode 0700 and the file with mode 0600.
+ */
+async function writeCredentialsFileAtomic(targetPath, data) {
+    const { fs, path } = await Promise.resolve().then(() => __importStar(require("../../internal/node.js")));
+    const dir = path.dirname(targetPath);
+    await fs.promises.mkdir(dir, { recursive: true, mode: 0o700 });
+    // Unique temp name avoids two concurrent writers (different processes or
+    // SDK instances) racing on the same '.tmp' sibling and corrupting each
+    // other's bytes mid-write before the rename.
+    const tmpPath = `${targetPath}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+    try {
+        const fh = await fs.promises.open(tmpPath, 'w', 0o600);
+        try {
+            await fh.writeFile(JSON.stringify(data, null, 2));
+            await fh.sync();
+        }
+        finally {
+            await fh.close();
+        }
+        await fs.promises.rename(tmpPath, targetPath);
+    }
+    catch (err) {
+        // Don't leak the temp file if anything between create and rename failed.
+        await fs.promises.unlink(tmpPath).catch(() => { });
+        throw err;
+    }
+    // fsync the parent directory so the rename survives a crash.
+    try {
+        const dirFh = await fs.promises.open(dir, 'r');
+        try {
+            await dirFh.sync();
+        }
+        finally {
+            await dirFh.close();
+        }
+    }
+    catch {
+        // Directory fsync is best-effort (unsupported on some platforms, e.g. Windows).
+    }
+}
+async function readLimitedText(resp) {
+    if (!resp.body) {
+        return '';
+    }
+    const reader = resp.body.getReader();
+    const chunks = [];
+    let received = 0;
+    for (;;) {
+        const { done, value } = await reader.read();
+        if (done)
+            break;
+        if (received + value.length > MAX_TOKEN_RESPONSE_BYTES) {
+            const remaining = MAX_TOKEN_RESPONSE_BYTES - received;
+            if (remaining > 0)
+                chunks.push(value.subarray(0, remaining));
+            await reader.cancel();
+            break;
+        }
+        chunks.push(value);
+        received += value.length;
+    }
+    let merged;
+    if (chunks.length === 1) {
+        merged = chunks[0];
+    }
+    else {
+        merged = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+        let offset = 0;
+        for (const c of chunks) {
+            merged.set(c, offset);
+            offset += c.length;
+        }
+    }
+    return new TextDecoder('utf-8').decode(merged);
+}
+class WorkloadIdentityError extends error_1.AnthropicError {
+    constructor(message, statusCode = null, body = null, requestId = null) {
+        super(message);
+        this.statusCode = statusCode;
+        this.body = body;
+        this.requestId = requestId;
+    }
+}
+exports.WorkloadIdentityError = WorkloadIdentityError;
+//# sourceMappingURL=types.js.map

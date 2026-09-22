@@ -1,0 +1,31 @@
+{
+  "name": "node-addon-native-custom-loader",
+  "version": "0.1.5",
+  "type": "commonjs",
+  "description": "Shared native binary loader for the node-addon-require-builtin and node-addon-internal-loader package families.",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "import": "./lib/index.js",
+      "require": "./lib/index.js",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "README.md",
+    "lib/",
+    "!lib/.tsbuildinfo",
+    "!lib/*.tsbuildinfo"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "scripts": {
+    "build:js": "tsc -b"
+  }
+}

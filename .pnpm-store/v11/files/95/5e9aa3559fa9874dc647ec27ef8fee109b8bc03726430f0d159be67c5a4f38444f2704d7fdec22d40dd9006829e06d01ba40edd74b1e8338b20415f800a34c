@@ -1,0 +1,12 @@
+export { booleanEquals } from "./booleanEquals";
+export { coalesce } from "./coalesce";
+export { getAttr } from "./getAttr";
+export { isSet } from "./isSet";
+export { isValidHostLabel } from "@smithy/core/transport";
+export { ite } from "./ite";
+export { not } from "./not";
+export { parseURL } from "./parseURL";
+export { split } from "./split";
+export { stringEquals } from "./stringEquals";
+export { substring } from "./substring";
+export { uriEncode } from "./uriEncode";

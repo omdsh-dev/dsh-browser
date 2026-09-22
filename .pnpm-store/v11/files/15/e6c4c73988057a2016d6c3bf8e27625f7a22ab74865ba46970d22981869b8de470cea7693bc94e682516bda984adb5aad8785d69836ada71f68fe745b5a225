@@ -1,0 +1,3 @@
+export { Skills, type DeletedSkill, type Skill, type SkillSource, type SkillCreateParams, type SkillListParams, type SkillsPageCursor, } from "./skills.mjs";
+export { Versions, type DeletedSkillVersion, type SkillVersion, type VersionCreateParams, type VersionRetrieveParams, type VersionListParams, type VersionDeleteParams, type SkillVersionsPageCursor, } from "./versions.mjs";
+//# sourceMappingURL=index.d.mts.map

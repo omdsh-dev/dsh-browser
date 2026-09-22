@@ -1,0 +1,1 @@
+export { EndpointError } from "./EndpointError";

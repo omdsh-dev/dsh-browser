@@ -1,0 +1,10 @@
+import { type TSchema, type TSchemaOptions } from '../../types/schema.mjs';
+import { type TProperties } from '../../types/properties.mjs';
+import { type TOptional } from '../../types/_optional.mjs';
+import { type TState, type TInstantiateType } from '../instantiate.mjs';
+type TRemoveOptionalOperation<Type extends TSchema, Result extends TSchema = Type extends TOptional<infer Type extends TSchema> ? TRemoveOptionalOperation<Type> : Type> = Result;
+export type TRemoveOptionalAction<Type extends TSchema, Result extends TSchema = TRemoveOptionalOperation<Type>> = Result;
+export declare function RemoveOptionalAction<Type extends TSchema>(type: Type, options: TSchemaOptions): TRemoveOptionalAction<Type>;
+export type TRemoveOptionalInstantiate<Context extends TProperties, State extends TState, Type extends TSchema, InstantiateType extends TSchema = TInstantiateType<Context, State, Type>> = TRemoveOptionalAction<InstantiateType>;
+export declare function RemoveOptionalInstantiate<Context extends TProperties, State extends TState, Type extends TSchema>(context: Context, state: State, type: Type, options: TSchemaOptions): TRemoveOptionalInstantiate<Context, State, Type>;
+export {};

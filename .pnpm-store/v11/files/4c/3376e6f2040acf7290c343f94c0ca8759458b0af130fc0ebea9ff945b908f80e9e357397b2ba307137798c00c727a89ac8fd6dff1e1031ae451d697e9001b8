@@ -1,0 +1,1 @@
+{"version":3,"file":"request-signal.d.mts","sourceRoot":"","sources":["../src/internal/request-signal.ts"],"names":[],"mappings":"AA4CA,wBAAgB,4BAA4B,CAC1C,UAAU,EAAE,eAAe,EAC3B,MAAM,EAAE,WAAW,EACnB,QAAQ,EAAE,MAAM,IAAI,GACnB,IAAI,CAEN;AAMD,wBAAgB,sBAAsB,CAAC,IAAI,EAAE,MAAM,EAAE,UAAU,EAAE,eAAe,GAAG,IAAI,CAEtF;AAED,wBAAgB,oBAAoB,CAAC,UAAU,EAAE,eAAe,GAAG,IAAI,CAOtE"}

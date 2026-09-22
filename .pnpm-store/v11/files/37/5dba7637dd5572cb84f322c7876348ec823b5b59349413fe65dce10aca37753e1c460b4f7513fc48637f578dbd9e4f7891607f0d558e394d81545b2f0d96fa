@@ -1,0 +1,191 @@
+import { APIResource } from "../../core/resource.js";
+import * as BetaAPI from "./beta.js";
+import { APIPromise } from "../../core/api-promise.js";
+import { PageCursor, type PageCursorParams, PagePromise } from "../../core/pagination.js";
+import { type Uploadable } from "../../core/uploads.js";
+import { RequestOptions } from "../../internal/request-options.js";
+export declare class Files extends APIResource {
+    /**
+     * List Files
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const betaFileMetadata of client.beta.files.list()) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(params?: FileListParams | null | undefined, options?: RequestOptions): PagePromise<BetaFileMetadataPageCursor, BetaFileMetadata>;
+    /**
+     * Delete File
+     *
+     * @example
+     * ```ts
+     * const betaDeletedFile = await client.beta.files.delete(
+     *   'file_id',
+     * );
+     * ```
+     */
+    delete(fileID: string, params?: FileDeleteParams | null | undefined, options?: RequestOptions): APIPromise<BetaDeletedFile>;
+    /**
+     * Download File
+     *
+     * @example
+     * ```ts
+     * const response = await client.beta.files.download(
+     *   'file_id',
+     * );
+     *
+     * const content = await response.blob();
+     * console.log(content);
+     * ```
+     */
+    download(fileID: string, params?: FileDownloadParams | null | undefined, options?: RequestOptions): APIPromise<Response>;
+    /**
+     * Get File Metadata
+     *
+     * @example
+     * ```ts
+     * const betaFileMetadata =
+     *   await client.beta.files.retrieveMetadata('file_id');
+     * ```
+     */
+    retrieveMetadata(fileID: string, params?: FileRetrieveMetadataParams | null | undefined, options?: RequestOptions): APIPromise<BetaFileMetadata>;
+    /**
+     * Upload File
+     *
+     * @example
+     * ```ts
+     * const betaFileMetadata = await client.beta.files.upload({
+     *   file: fs.createReadStream('path/to/file'),
+     * });
+     * ```
+     */
+    upload(params: FileUploadParams, options?: RequestOptions): APIPromise<BetaFileMetadata>;
+}
+export type BetaFileMetadataPageCursor = PageCursor<BetaFileMetadata>;
+export interface BetaDeletedFile {
+    /**
+     * ID of the deleted file.
+     */
+    id: string;
+    /**
+     * Deleted object type.
+     *
+     * For file deletion, this is always `"file_deleted"`.
+     */
+    type?: 'file_deleted';
+}
+export interface BetaFileMetadata {
+    /**
+     * Unique object identifier.
+     *
+     * The format and length of IDs may change over time.
+     */
+    id: string;
+    /**
+     * RFC 3339 datetime string representing when the file was created.
+     */
+    created_at: string;
+    /**
+     * Original filename of the uploaded file.
+     */
+    filename: string;
+    /**
+     * MIME type of the file.
+     */
+    mime_type: string;
+    /**
+     * Size of the file in bytes.
+     */
+    size_bytes: number;
+    /**
+     * Object type.
+     *
+     * For files, this is always `"file"`.
+     */
+    type: 'file';
+    /**
+     * Whether the file can be downloaded.
+     */
+    downloadable?: boolean;
+    /**
+     * RFC 3339 datetime string representing when the file will expire and become
+     * unavailable for download. Null if the file does not expire. For files uploaded
+     * with `expires_in_seconds`, this is the upload time plus that value.
+     */
+    expires_at?: string | null;
+    /**
+     * The scope of this file, indicating the context in which it was created (e.g., a
+     * session).
+     */
+    scope?: BetaFileScope | null;
+}
+export interface BetaFileScope {
+    /**
+     * The ID of the scoping resource (e.g., the session ID).
+     */
+    id: string;
+    /**
+     * The type of scope (e.g., `"session"`).
+     */
+    type: 'session';
+}
+export interface FileListParams extends PageCursorParams {
+    /**
+     * Query param: Restrict the result set to Files whose `id` is in this list. At
+     * most 100 entries (after de-duplication). Mutually exclusive with `page` and
+     * `limit`. When supplied, the response is always a single page (`next_page` is
+     * null). IDs that do not resolve to a visible File — including deleted Files — are
+     * silently omitted.
+     */
+    ids?: Array<string> | null;
+    /**
+     * Query param: Filter by scope ID. Only returns files associated with the
+     * specified scope (e.g., a session ID).
+     */
+    scope_id?: string;
+    /**
+     * Header param: Optional header to specify the beta version(s) you want to use.
+     */
+    betas?: Array<BetaAPI.AnthropicBeta>;
+}
+export interface FileDeleteParams {
+    /**
+     * Optional header to specify the beta version(s) you want to use.
+     */
+    betas?: Array<BetaAPI.AnthropicBeta>;
+}
+export interface FileDownloadParams {
+    /**
+     * Optional header to specify the beta version(s) you want to use.
+     */
+    betas?: Array<BetaAPI.AnthropicBeta>;
+}
+export interface FileRetrieveMetadataParams {
+    /**
+     * Optional header to specify the beta version(s) you want to use.
+     */
+    betas?: Array<BetaAPI.AnthropicBeta>;
+}
+export interface FileUploadParams {
+    /**
+     * Body param: The file to upload
+     */
+    file: Uploadable;
+    /**
+     * Body param: Seconds from upload until the file expires and its bytes become
+     * permanently unavailable. Must be between 3600 (one hour) and 7776000 (ninety
+     * days).
+     */
+    expires_in_seconds?: number;
+    /**
+     * Header param: Optional header to specify the beta version(s) you want to use.
+     */
+    betas?: Array<BetaAPI.AnthropicBeta>;
+}
+export declare namespace Files {
+    export { type BetaDeletedFile as BetaDeletedFile, type BetaFileMetadata as BetaFileMetadata, type BetaFileScope as BetaFileScope, type BetaFileMetadataPageCursor as BetaFileMetadataPageCursor, type FileListParams as FileListParams, type FileDeleteParams as FileDeleteParams, type FileDownloadParams as FileDownloadParams, type FileRetrieveMetadataParams as FileRetrieveMetadataParams, type FileUploadParams as FileUploadParams, };
+}
+//# sourceMappingURL=files.d.ts.map

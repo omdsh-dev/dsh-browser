@@ -1,0 +1,433 @@
+import { APIResource } from "../../../core/resource.mjs";
+import * as BetaAPI from "../beta.mjs";
+import * as WorkAPI from "./work.mjs";
+import { BetaSelfHostedWork, BetaSelfHostedWorkHeartbeatResponse, BetaSelfHostedWorkListResponse, BetaSelfHostedWorkQueueStats, BetaSelfHostedWorkStopRequest, BetaSelfHostedWorkUpdateRequest, BetaSelfHostedWorksPageCursor, BetaSessionWorkData, Work, WorkAckParams, WorkHeartbeatParams, WorkListParams, WorkPollParams, WorkRetrieveParams, WorkStatsParams, WorkStopParams, WorkUpdateParams } from "./work.mjs";
+import { APIPromise } from "../../../core/api-promise.mjs";
+import { PageCursor, type PageCursorParams, PagePromise } from "../../../core/pagination.mjs";
+import { RequestOptions } from "../../../internal/request-options.mjs";
+export declare class Environments extends APIResource {
+    work: WorkAPI.Work;
+    /**
+     * Create a new environment with the specified configuration.
+     *
+     * @example
+     * ```ts
+     * const betaEnvironment =
+     *   await client.beta.environments.create({
+     *     name: 'python-data-analysis',
+     *   });
+     * ```
+     */
+    create(params: EnvironmentCreateParams, options?: RequestOptions): APIPromise<BetaEnvironment>;
+    /**
+     * Retrieve a specific environment by ID.
+     *
+     * @example
+     * ```ts
+     * const betaEnvironment =
+     *   await client.beta.environments.retrieve(
+     *     'env_011CZkZ9X2dpNyB7HsEFoRfW',
+     *   );
+     * ```
+     */
+    retrieve(environmentID: string, params?: EnvironmentRetrieveParams | null | undefined, options?: RequestOptions): APIPromise<BetaEnvironment>;
+    /**
+     * Update an existing environment's configuration.
+     *
+     * @example
+     * ```ts
+     * const betaEnvironment =
+     *   await client.beta.environments.update(
+     *     'env_011CZkZ9X2dpNyB7HsEFoRfW',
+     *   );
+     * ```
+     */
+    update(environmentID: string, params: EnvironmentUpdateParams, options?: RequestOptions): APIPromise<BetaEnvironment>;
+    /**
+     * List environments with pagination support.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const betaEnvironment of client.beta.environments.list()) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(params?: EnvironmentListParams | null | undefined, options?: RequestOptions): PagePromise<BetaEnvironmentsPageCursor, BetaEnvironment>;
+    /**
+     * Delete an environment by ID. Returns a confirmation of the deletion.
+     *
+     * @example
+     * ```ts
+     * const betaEnvironmentDeleteResponse =
+     *   await client.beta.environments.delete(
+     *     'env_011CZkZ9X2dpNyB7HsEFoRfW',
+     *   );
+     * ```
+     */
+    delete(environmentID: string, params?: EnvironmentDeleteParams | null | undefined, options?: RequestOptions): APIPromise<BetaEnvironmentDeleteResponse>;
+    /**
+     * Archive an environment by ID. Archived environments cannot be used to create new
+     * sessions.
+     *
+     * @example
+     * ```ts
+     * const betaEnvironment =
+     *   await client.beta.environments.archive(
+     *     'env_011CZkZ9X2dpNyB7HsEFoRfW',
+     *   );
+     * ```
+     */
+    archive(environmentID: string, params?: EnvironmentArchiveParams | null | undefined, options?: RequestOptions): APIPromise<BetaEnvironment>;
+}
+export type BetaEnvironmentsPageCursor = PageCursor<BetaEnvironment>;
+/**
+ * `cloud` environment configuration.
+ */
+export interface BetaCloudConfig {
+    /**
+     * Network configuration policy.
+     */
+    networking: BetaUnrestrictedNetwork | BetaLimitedNetwork;
+    /**
+     * Package manager configuration.
+     */
+    packages: BetaPackages;
+    /**
+     * Environment type
+     */
+    type: 'cloud';
+}
+/**
+ * Request params for `cloud` environment configuration.
+ *
+ * Fields default to null; on update, omitted fields preserve the existing value.
+ */
+export interface BetaCloudConfigParams {
+    /**
+     * Environment type
+     */
+    type: 'cloud';
+    /**
+     * Network configuration policy. Omit on update to preserve the existing value.
+     */
+    networking?: BetaUnrestrictedNetwork | BetaLimitedNetworkParams | null;
+    /**
+     * Specify packages (and optionally their versions) available in this environment.
+     *
+     * When versioning, use the version semantics relevant for the package manager,
+     * e.g. for `pip` use `package==1.0.0`. You are responsible for validating the
+     * package and version exist. Unversioned installs the latest.
+     *
+     * Under `limited` networking, requires `networking.allow_package_managers` to be
+     * `true`.
+     */
+    packages?: BetaPackagesParams | null;
+}
+/**
+ * Unified Environment resource for both cloud and self-hosted environments.
+ */
+export interface BetaEnvironment {
+    /**
+     * Environment identifier (e.g., 'env\_...')
+     */
+    id: string;
+    /**
+     * RFC 3339 timestamp when environment was archived, or null if not archived
+     */
+    archived_at: string | null;
+    /**
+     * Environment configuration (either Anthropic Cloud or self-hosted)
+     */
+    config: BetaCloudConfig | BetaSelfHostedConfig;
+    /**
+     * RFC 3339 timestamp when environment was created
+     */
+    created_at: string;
+    /**
+     * User-provided description for the environment; null when unset
+     */
+    description: string | null;
+    /**
+     * User-provided metadata key-value pairs
+     */
+    metadata: {
+        [key: string]: string;
+    };
+    /**
+     * Human-readable name for the environment
+     */
+    name: string;
+    /**
+     * The type of object (always 'environment')
+     */
+    type: 'environment';
+    /**
+     * RFC 3339 timestamp when environment was last updated
+     */
+    updated_at: string;
+    /**
+     * The visibility scope for this environment. 'organization' means visible to all
+     * accounts. 'account' means visible only to the owning account.
+     */
+    scope?: 'organization' | 'account';
+}
+/**
+ * Response after deleting an environment.
+ */
+export interface BetaEnvironmentDeleteResponse {
+    /**
+     * Environment identifier
+     */
+    id: string;
+    /**
+     * The type of response
+     */
+    type: 'environment_deleted';
+}
+/**
+ * Limited network access.
+ */
+export interface BetaLimitedNetwork {
+    /**
+     * Permits outbound access to MCP server endpoints configured on the agent, beyond
+     * those listed in the `allowed_hosts` array.
+     */
+    allow_mcp_servers: boolean;
+    /**
+     * Permits outbound access to public package registries (PyPI, npm, etc.) beyond
+     * those listed in the `allowed_hosts` array.
+     */
+    allow_package_managers: boolean;
+    /**
+     * Specifies domains the container can reach.
+     */
+    allowed_hosts: Array<string>;
+    /**
+     * Network policy type
+     */
+    type: 'limited';
+}
+/**
+ * Limited network request params.
+ *
+ * Fields default to null; on update, omitted fields preserve the existing value.
+ */
+export interface BetaLimitedNetworkParams {
+    /**
+     * Network policy type
+     */
+    type: 'limited';
+    /**
+     * Permits outbound access to MCP server endpoints configured on the agent, beyond
+     * those listed in the `allowed_hosts` array. Defaults to `false`.
+     */
+    allow_mcp_servers?: boolean | null;
+    /**
+     * Permits outbound access to public package registries (PyPI, npm, etc.) beyond
+     * those listed in the `allowed_hosts` array. Defaults to `false` on creation. Must
+     * be `true` when `packages` are specified.
+     */
+    allow_package_managers?: boolean | null;
+    /**
+     * Specifies domains the container can reach.
+     */
+    allowed_hosts?: Array<string> | null;
+}
+/**
+ * Packages (and their versions) available in this environment.
+ */
+export interface BetaPackages {
+    /**
+     * Ubuntu/Debian packages to install
+     */
+    apt: Array<string>;
+    /**
+     * Rust packages to install
+     */
+    cargo: Array<string>;
+    /**
+     * Ruby packages to install
+     */
+    gem: Array<string>;
+    /**
+     * Go packages to install
+     */
+    go: Array<string>;
+    /**
+     * Node.js packages to install
+     */
+    npm: Array<string>;
+    /**
+     * Python packages to install
+     */
+    pip: Array<string>;
+    /**
+     * Package configuration type
+     */
+    type?: 'packages';
+}
+/**
+ * Specify packages (and optionally their versions) available in this environment.
+ *
+ * When versioning, use the version semantics relevant for the package manager,
+ * e.g. for `pip` use `package==1.0.0`. You are responsible for validating the
+ * package and version exist. Unversioned installs the latest.
+ *
+ * Under `limited` networking, requires `networking.allow_package_managers` to be
+ * `true`.
+ */
+export interface BetaPackagesParams {
+    /**
+     * Ubuntu/Debian packages to install
+     */
+    apt?: Array<string> | null;
+    /**
+     * Rust packages to install
+     */
+    cargo?: Array<string> | null;
+    /**
+     * Ruby packages to install
+     */
+    gem?: Array<string> | null;
+    /**
+     * Go packages to install
+     */
+    go?: Array<string> | null;
+    /**
+     * Node.js packages to install
+     */
+    npm?: Array<string> | null;
+    /**
+     * Python packages to install
+     */
+    pip?: Array<string> | null;
+    /**
+     * Package configuration type
+     */
+    type?: 'packages';
+}
+/**
+ * Configuration for self-hosted environments.
+ */
+export interface BetaSelfHostedConfig {
+    /**
+     * Environment type
+     */
+    type: 'self_hosted';
+}
+/**
+ * Request params for `self_hosted` environment configuration.
+ */
+export interface BetaSelfHostedConfigParams {
+    /**
+     * Environment type
+     */
+    type: 'self_hosted';
+}
+/**
+ * Unrestricted network access.
+ */
+export interface BetaUnrestrictedNetwork {
+    /**
+     * Network policy type
+     */
+    type: 'unrestricted';
+}
+export interface EnvironmentCreateParams {
+    /**
+     * Body param: Human-readable name for the environment
+     */
+    name: string;
+    /**
+     * Body param: Environment configuration
+     */
+    config?: BetaCloudConfigParams | BetaSelfHostedConfigParams | null;
+    /**
+     * Body param: Optional description of the environment
+     */
+    description?: string | null;
+    /**
+     * Body param: User-provided metadata key-value pairs
+     */
+    metadata?: {
+        [key: string]: string;
+    };
+    /**
+     * Body param: The visibility scope for this environment. 'organization' makes the
+     * environment visible to all accounts. 'account' restricts visibility to the
+     * owning account only. Only applicable for self-hosted environments. If not
+     * specified, defaults based on organization type.
+     */
+    scope?: 'organization' | 'account' | null;
+    /**
+     * Header param: Optional header to specify the beta version(s) you want to use.
+     */
+    betas?: Array<BetaAPI.AnthropicBeta>;
+}
+export interface EnvironmentRetrieveParams {
+    /**
+     * Optional header to specify the beta version(s) you want to use.
+     */
+    betas?: Array<BetaAPI.AnthropicBeta>;
+}
+export interface EnvironmentUpdateParams {
+    /**
+     * Body param: Updated environment configuration
+     */
+    config?: BetaCloudConfigParams | BetaSelfHostedConfigParams | null;
+    /**
+     * Body param: Updated description of the environment. Omit to preserve; null
+     * clears to null; an empty string is stored as an empty string.
+     */
+    description?: string | null;
+    /**
+     * Body param: User-provided metadata key-value pairs. Set a value to null or empty
+     * string to delete the key.
+     */
+    metadata?: {
+        [key: string]: string | null;
+    };
+    /**
+     * Body param: Updated name for the environment
+     */
+    name?: string | null;
+    /**
+     * Body param: The visibility scope for this environment. 'organization' makes the
+     * environment visible to all accounts. 'account' restricts visibility to the
+     * owning account only.
+     */
+    scope?: 'organization' | 'account' | null;
+    /**
+     * Header param: Optional header to specify the beta version(s) you want to use.
+     */
+    betas?: Array<BetaAPI.AnthropicBeta>;
+}
+export interface EnvironmentListParams extends PageCursorParams {
+    /**
+     * Query param: Include archived environments in the response
+     */
+    include_archived?: boolean;
+    /**
+     * Header param: Optional header to specify the beta version(s) you want to use.
+     */
+    betas?: Array<BetaAPI.AnthropicBeta>;
+}
+export interface EnvironmentDeleteParams {
+    /**
+     * Optional header to specify the beta version(s) you want to use.
+     */
+    betas?: Array<BetaAPI.AnthropicBeta>;
+}
+export interface EnvironmentArchiveParams {
+    /**
+     * Optional header to specify the beta version(s) you want to use.
+     */
+    betas?: Array<BetaAPI.AnthropicBeta>;
+}
+export declare namespace Environments {
+    export { type BetaCloudConfig as BetaCloudConfig, type BetaCloudConfigParams as BetaCloudConfigParams, type BetaEnvironment as BetaEnvironment, type BetaEnvironmentDeleteResponse as BetaEnvironmentDeleteResponse, type BetaLimitedNetwork as BetaLimitedNetwork, type BetaLimitedNetworkParams as BetaLimitedNetworkParams, type BetaPackages as BetaPackages, type BetaPackagesParams as BetaPackagesParams, type BetaSelfHostedConfig as BetaSelfHostedConfig, type BetaSelfHostedConfigParams as BetaSelfHostedConfigParams, type BetaUnrestrictedNetwork as BetaUnrestrictedNetwork, type BetaEnvironmentsPageCursor as BetaEnvironmentsPageCursor, type EnvironmentCreateParams as EnvironmentCreateParams, type EnvironmentRetrieveParams as EnvironmentRetrieveParams, type EnvironmentUpdateParams as EnvironmentUpdateParams, type EnvironmentListParams as EnvironmentListParams, type EnvironmentDeleteParams as EnvironmentDeleteParams, type EnvironmentArchiveParams as EnvironmentArchiveParams, };
+    export { Work as Work, type BetaSelfHostedWork as BetaSelfHostedWork, type BetaSelfHostedWorkHeartbeatResponse as BetaSelfHostedWorkHeartbeatResponse, type BetaSelfHostedWorkListResponse as BetaSelfHostedWorkListResponse, type BetaSelfHostedWorkQueueStats as BetaSelfHostedWorkQueueStats, type BetaSelfHostedWorkStopRequest as BetaSelfHostedWorkStopRequest, type BetaSelfHostedWorkUpdateRequest as BetaSelfHostedWorkUpdateRequest, type BetaSessionWorkData as BetaSessionWorkData, type BetaSelfHostedWorksPageCursor as BetaSelfHostedWorksPageCursor, type WorkRetrieveParams as WorkRetrieveParams, type WorkUpdateParams as WorkUpdateParams, type WorkListParams as WorkListParams, type WorkAckParams as WorkAckParams, type WorkHeartbeatParams as WorkHeartbeatParams, type WorkPollParams as WorkPollParams, type WorkStatsParams as WorkStatsParams, type WorkStopParams as WorkStopParams, };
+}
+//# sourceMappingURL=environments.d.mts.map

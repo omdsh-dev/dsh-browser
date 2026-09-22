@@ -1,0 +1,716 @@
+import { APIResource } from "../../../core/resource.mjs";
+import * as BetaAPI from "../beta.mjs";
+import { APIPromise } from "../../../core/api-promise.mjs";
+import { PageCursor, type PageCursorParams, PagePromise } from "../../../core/pagination.mjs";
+import { RequestOptions } from "../../../internal/request-options.mjs";
+export declare class Credentials extends APIResource {
+    /**
+     * Create Credential
+     *
+     * @example
+     * ```ts
+     * const betaManagedAgentsCredential =
+     *   await client.beta.vaults.credentials.create(
+     *     'vlt_011CZkZDLs7fYzm1hXNPeRjv',
+     *     {
+     *       auth: {
+     *         token: 'bearer_exampletoken',
+     *         mcp_server_url:
+     *           'https://example-server.modelcontextprotocol.io/sse',
+     *         type: 'static_bearer',
+     *       },
+     *     },
+     *   );
+     * ```
+     */
+    create(vaultID: string, params: CredentialCreateParams, options?: RequestOptions): APIPromise<BetaManagedAgentsCredential>;
+    /**
+     * Get Credential
+     *
+     * @example
+     * ```ts
+     * const betaManagedAgentsCredential =
+     *   await client.beta.vaults.credentials.retrieve(
+     *     'vcrd_011CZkZEMt8gZan2iYOQfSkw',
+     *     { vault_id: 'vlt_011CZkZDLs7fYzm1hXNPeRjv' },
+     *   );
+     * ```
+     */
+    retrieve(credentialID: string, params: CredentialRetrieveParams, options?: RequestOptions): APIPromise<BetaManagedAgentsCredential>;
+    /**
+     * Update Credential
+     *
+     * @example
+     * ```ts
+     * const betaManagedAgentsCredential =
+     *   await client.beta.vaults.credentials.update(
+     *     'vcrd_011CZkZEMt8gZan2iYOQfSkw',
+     *     { vault_id: 'vlt_011CZkZDLs7fYzm1hXNPeRjv' },
+     *   );
+     * ```
+     */
+    update(credentialID: string, params: CredentialUpdateParams, options?: RequestOptions): APIPromise<BetaManagedAgentsCredential>;
+    /**
+     * List Credentials
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const betaManagedAgentsCredential of client.beta.vaults.credentials.list(
+     *   'vlt_011CZkZDLs7fYzm1hXNPeRjv',
+     * )) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(vaultID: string, params?: CredentialListParams | null | undefined, options?: RequestOptions): PagePromise<BetaManagedAgentsCredentialsPageCursor, BetaManagedAgentsCredential>;
+    /**
+     * Delete Credential
+     *
+     * @example
+     * ```ts
+     * const betaManagedAgentsDeletedCredential =
+     *   await client.beta.vaults.credentials.delete(
+     *     'vcrd_011CZkZEMt8gZan2iYOQfSkw',
+     *     { vault_id: 'vlt_011CZkZDLs7fYzm1hXNPeRjv' },
+     *   );
+     * ```
+     */
+    delete(credentialID: string, params: CredentialDeleteParams, options?: RequestOptions): APIPromise<BetaManagedAgentsDeletedCredential>;
+    /**
+     * Archive Credential
+     *
+     * @example
+     * ```ts
+     * const betaManagedAgentsCredential =
+     *   await client.beta.vaults.credentials.archive(
+     *     'vcrd_011CZkZEMt8gZan2iYOQfSkw',
+     *     { vault_id: 'vlt_011CZkZDLs7fYzm1hXNPeRjv' },
+     *   );
+     * ```
+     */
+    archive(credentialID: string, params: CredentialArchiveParams, options?: RequestOptions): APIPromise<BetaManagedAgentsCredential>;
+    /**
+     * Validate Credential
+     *
+     * @example
+     * ```ts
+     * const betaManagedAgentsCredentialValidation =
+     *   await client.beta.vaults.credentials.mcpOAuthValidate(
+     *     'vcrd_011CZkZEMt8gZan2iYOQfSkw',
+     *     { vault_id: 'vlt_011CZkZDLs7fYzm1hXNPeRjv' },
+     *   );
+     * ```
+     */
+    mcpOAuthValidate(credentialID: string, params: CredentialMCPOAuthValidateParams, options?: RequestOptions): APIPromise<BetaManagedAgentsCredentialValidation>;
+}
+export type BetaManagedAgentsCredentialsPageCursor = PageCursor<BetaManagedAgentsCredential>;
+/**
+ * A credential stored in a vault. Sensitive fields are never returned in
+ * responses.
+ */
+export interface BetaManagedAgentsCredential {
+    /**
+     * Unique identifier for the credential.
+     */
+    id: string;
+    /**
+     * A timestamp in RFC 3339 format
+     */
+    archived_at: string | null;
+    /**
+     * Authentication details for a credential.
+     */
+    auth: BetaManagedAgentsMCPOAuthAuthResponse | BetaManagedAgentsStaticBearerAuthResponse | BetaManagedAgentsEnvironmentVariableAuthResponse;
+    /**
+     * A timestamp in RFC 3339 format
+     */
+    created_at: string;
+    /**
+     * Arbitrary key-value metadata attached to the credential.
+     */
+    metadata: {
+        [key: string]: string;
+    };
+    type: 'vault_credential';
+    /**
+     * A timestamp in RFC 3339 format
+     */
+    updated_at: string;
+    /**
+     * Identifier of the vault this credential belongs to.
+     */
+    vault_id: string;
+    /**
+     * Human-readable name for the credential.
+     */
+    display_name?: string | null;
+}
+/**
+ * Substitute the secret on any host the session's Environment network policy
+ * permits egress to. The Environment's network policy is the only boundary on
+ * where the secret can reach.
+ */
+export type BetaManagedAgentsCredentialNetworkingParams = BetaManagedAgentsUnrestrictedCredentialNetworkingParams | BetaManagedAgentsLimitedCredentialNetworkingParams;
+/**
+ * Result of live-probing a credential against its configured MCP server.
+ */
+export interface BetaManagedAgentsCredentialValidation {
+    /**
+     * Unique identifier of the credential that was validated.
+     */
+    credential_id: string;
+    /**
+     * Whether the credential has a refresh token configured.
+     */
+    has_refresh_token: boolean;
+    /**
+     * The failing step of an MCP validation probe.
+     */
+    mcp_probe: BetaManagedAgentsMCPProbe | null;
+    /**
+     * Outcome of a refresh-token exchange attempted during credential validation.
+     */
+    refresh: BetaManagedAgentsRefreshObject | null;
+    /**
+     * Overall verdict of a credential validation probe.
+     */
+    status: BetaManagedAgentsCredentialValidationStatus;
+    type: 'vault_credential_validation';
+    /**
+     * A timestamp in RFC 3339 format
+     */
+    validated_at: string;
+    /**
+     * Identifier of the vault containing the credential.
+     */
+    vault_id: string;
+}
+/**
+ * Overall verdict of a credential validation probe.
+ */
+export type BetaManagedAgentsCredentialValidationStatus = 'valid' | 'invalid' | 'unknown';
+/**
+ * Confirmation of a deleted credential.
+ */
+export interface BetaManagedAgentsDeletedCredential {
+    /**
+     * Unique identifier of the deleted credential.
+     */
+    id: string;
+    type: 'vault_credential_deleted';
+}
+/**
+ * Environment variable credential details. The secret value is never returned.
+ */
+export interface BetaManagedAgentsEnvironmentVariableAuthResponse {
+    /**
+     * Where in the outbound request the secret value is substituted.
+     */
+    injection_location: BetaManagedAgentsInjectionLocationResponse;
+    /**
+     * Outbound hosts the secret value is substituted on.
+     */
+    networking: BetaManagedAgentsUnrestrictedCredentialNetworkingResponse | BetaManagedAgentsLimitedCredentialNetworkingResponse;
+    /**
+     * Name of the environment variable.
+     */
+    secret_name: string;
+    type: 'environment_variable';
+}
+/**
+ * Parameters for creating an environment variable credential.
+ */
+export interface BetaManagedAgentsEnvironmentVariableCreateParams {
+    /**
+     * Outbound hosts the secret value is substituted on.
+     */
+    networking: BetaManagedAgentsCredentialNetworkingParams;
+    /**
+     * Name of the environment variable. Immutable after create.
+     */
+    secret_name: string;
+    /**
+     * Secret value. Write-only; never returned in responses.
+     */
+    secret_value: string;
+    type: 'environment_variable';
+    /**
+     * Where in the outbound request the secret value may be substituted.
+     */
+    injection_location?: BetaManagedAgentsInjectionLocationParams;
+}
+/**
+ * Parameters for updating an environment variable credential. `secret_name` is
+ * immutable.
+ */
+export interface BetaManagedAgentsEnvironmentVariableUpdateParams {
+    type: 'environment_variable';
+    /**
+     * Updated injection location.
+     */
+    injection_location?: BetaManagedAgentsInjectionLocationUpdateParams;
+    /**
+     * Updated networking scope. Full replacement.
+     */
+    networking?: BetaManagedAgentsCredentialNetworkingParams | null;
+    /**
+     * Updated secret value.
+     */
+    secret_value?: string | null;
+}
+/**
+ * Where in the outbound request the secret value may be substituted.
+ */
+export interface BetaManagedAgentsInjectionLocationParams {
+    /**
+     * Substitute when the placeholder appears in the request body.
+     */
+    body?: boolean;
+    /**
+     * Substitute when the placeholder appears in a request header value.
+     */
+    header?: boolean;
+}
+/**
+ * Where in the outbound request the secret value is substituted.
+ */
+export interface BetaManagedAgentsInjectionLocationResponse {
+    /**
+     * Whether the placeholder is substituted in the request body.
+     */
+    body: boolean;
+    /**
+     * Whether the placeholder is substituted in request header values.
+     */
+    header: boolean;
+}
+/**
+ * Updated injection location.
+ */
+export interface BetaManagedAgentsInjectionLocationUpdateParams {
+    /**
+     * Substitute when the placeholder appears in the request body.
+     */
+    body?: boolean;
+    /**
+     * Substitute when the placeholder appears in a request header value.
+     */
+    header?: boolean;
+}
+/**
+ * Substitute the secret only on requests to the listed hosts.
+ */
+export interface BetaManagedAgentsLimitedCredentialNetworkingParams {
+    /**
+     * Hostnames on which the secret will be substituted. Each entry is a bare hostname
+     * (`api.example.com`), an IPv4 address (`192.0.2.1`), or a `*.`-prefixed wildcard
+     * (`*.example.com`). URLs, ports, paths, and IPv6 addresses are not accepted. At
+     * most 16 entries.
+     */
+    allowed_hosts: Array<string>;
+    type: 'limited';
+}
+/**
+ * The secret is substituted only on requests to the listed hosts.
+ */
+export interface BetaManagedAgentsLimitedCredentialNetworkingResponse {
+    /**
+     * Hostnames on which the secret will be substituted. An entry matches the request
+     * host exactly; a `*.`-prefixed entry matches any subdomain of the named domain
+     * but not the domain itself.
+     */
+    allowed_hosts: Array<string>;
+    type: 'limited';
+}
+/**
+ * OAuth credential details for an MCP server.
+ */
+export interface BetaManagedAgentsMCPOAuthAuthResponse {
+    /**
+     * URL of the MCP server this credential authenticates against.
+     */
+    mcp_server_url: string;
+    type: 'mcp_oauth';
+    /**
+     * A timestamp in RFC 3339 format
+     */
+    expires_at?: string | null;
+    /**
+     * OAuth refresh token configuration returned in credential responses.
+     */
+    refresh?: BetaManagedAgentsMCPOAuthRefreshResponse | null;
+}
+/**
+ * Parameters for creating an MCP OAuth credential.
+ */
+export interface BetaManagedAgentsMCPOAuthCreateParams {
+    /**
+     * OAuth access token.
+     */
+    access_token: string;
+    /**
+     * URL of the MCP server this credential authenticates against.
+     */
+    mcp_server_url: string;
+    type: 'mcp_oauth';
+    /**
+     * A timestamp in RFC 3339 format
+     */
+    expires_at?: string | null;
+    /**
+     * OAuth refresh token parameters for creating a credential with refresh support.
+     */
+    refresh?: BetaManagedAgentsMCPOAuthRefreshParams | null;
+}
+/**
+ * OAuth refresh token parameters for creating a credential with refresh support.
+ */
+export interface BetaManagedAgentsMCPOAuthRefreshParams {
+    /**
+     * OAuth client ID.
+     */
+    client_id: string;
+    /**
+     * OAuth refresh token.
+     */
+    refresh_token: string;
+    /**
+     * Token endpoint URL used to refresh the access token.
+     */
+    token_endpoint: string;
+    /**
+     * Token endpoint requires no client authentication.
+     */
+    token_endpoint_auth: BetaManagedAgentsTokenEndpointAuthNoneParam | BetaManagedAgentsTokenEndpointAuthBasicParam | BetaManagedAgentsTokenEndpointAuthPostParam;
+    /**
+     * OAuth resource indicator.
+     */
+    resource?: string | null;
+    /**
+     * OAuth scope for the refresh request.
+     */
+    scope?: string | null;
+}
+/**
+ * OAuth refresh token configuration returned in credential responses.
+ */
+export interface BetaManagedAgentsMCPOAuthRefreshResponse {
+    /**
+     * OAuth client ID.
+     */
+    client_id: string;
+    /**
+     * Token endpoint URL used to refresh the access token.
+     */
+    token_endpoint: string;
+    /**
+     * Token endpoint requires no client authentication.
+     */
+    token_endpoint_auth: BetaManagedAgentsTokenEndpointAuthNoneResponse | BetaManagedAgentsTokenEndpointAuthBasicResponse | BetaManagedAgentsTokenEndpointAuthPostResponse;
+    /**
+     * OAuth resource indicator.
+     */
+    resource?: string | null;
+    /**
+     * OAuth scope for the refresh request.
+     */
+    scope?: string | null;
+}
+/**
+ * Parameters for updating OAuth refresh token configuration.
+ */
+export interface BetaManagedAgentsMCPOAuthRefreshUpdateParams {
+    /**
+     * Updated OAuth refresh token.
+     */
+    refresh_token?: string | null;
+    /**
+     * Updated OAuth scope for the refresh request.
+     */
+    scope?: string | null;
+    /**
+     * Updated HTTP Basic authentication parameters for the token endpoint.
+     */
+    token_endpoint_auth?: BetaManagedAgentsTokenEndpointAuthBasicUpdateParam | BetaManagedAgentsTokenEndpointAuthPostUpdateParam;
+}
+/**
+ * Parameters for updating an MCP OAuth credential. The `mcp_server_url` is
+ * immutable.
+ */
+export interface BetaManagedAgentsMCPOAuthUpdateParams {
+    type: 'mcp_oauth';
+    /**
+     * Updated OAuth access token.
+     */
+    access_token?: string | null;
+    /**
+     * A timestamp in RFC 3339 format
+     */
+    expires_at?: string | null;
+    /**
+     * Parameters for updating OAuth refresh token configuration.
+     */
+    refresh?: BetaManagedAgentsMCPOAuthRefreshUpdateParams | null;
+}
+/**
+ * The failing step of an MCP validation probe.
+ */
+export interface BetaManagedAgentsMCPProbe {
+    /**
+     * An HTTP response captured during a credential validation probe.
+     */
+    http_response: BetaManagedAgentsRefreshHTTPResponse | null;
+    /**
+     * The MCP method that failed (for example `initialize` or `tools/list`).
+     */
+    method: string;
+}
+/**
+ * An HTTP response captured during a credential validation probe.
+ */
+export interface BetaManagedAgentsRefreshHTTPResponse {
+    /**
+     * Response body. May be truncated and has sensitive values scrubbed.
+     */
+    body: string;
+    /**
+     * Whether `body` was truncated.
+     */
+    body_truncated: boolean;
+    /**
+     * Value of the `Content-Type` response header.
+     */
+    content_type: string;
+    /**
+     * HTTP status code.
+     */
+    status_code: number;
+}
+/**
+ * Outcome of a refresh-token exchange attempted during credential validation.
+ */
+export interface BetaManagedAgentsRefreshObject {
+    /**
+     * An HTTP response captured during a credential validation probe.
+     */
+    http_response: BetaManagedAgentsRefreshHTTPResponse | null;
+    /**
+     * Outcome of a refresh-token exchange attempted during credential validation.
+     */
+    status: 'succeeded' | 'failed' | 'connect_error' | 'no_refresh_token';
+}
+/**
+ * Static bearer token credential details for an MCP server.
+ */
+export interface BetaManagedAgentsStaticBearerAuthResponse {
+    /**
+     * URL of the MCP server this credential authenticates against.
+     */
+    mcp_server_url: string;
+    type: 'static_bearer';
+}
+/**
+ * Parameters for creating a static bearer token credential.
+ */
+export interface BetaManagedAgentsStaticBearerCreateParams {
+    /**
+     * Static bearer token value.
+     */
+    token: string;
+    /**
+     * URL of the MCP server this credential authenticates against.
+     */
+    mcp_server_url: string;
+    type: 'static_bearer';
+}
+/**
+ * Parameters for updating a static bearer token credential. The `mcp_server_url`
+ * is immutable.
+ */
+export interface BetaManagedAgentsStaticBearerUpdateParams {
+    type: 'static_bearer';
+    /**
+     * Updated static bearer token value.
+     */
+    token?: string | null;
+}
+/**
+ * Token endpoint uses HTTP Basic authentication with client credentials.
+ */
+export interface BetaManagedAgentsTokenEndpointAuthBasicParam {
+    /**
+     * OAuth client secret.
+     */
+    client_secret: string;
+    type: 'client_secret_basic';
+}
+/**
+ * Token endpoint uses HTTP Basic authentication with client credentials.
+ */
+export interface BetaManagedAgentsTokenEndpointAuthBasicResponse {
+    type: 'client_secret_basic';
+}
+/**
+ * Updated HTTP Basic authentication parameters for the token endpoint.
+ */
+export interface BetaManagedAgentsTokenEndpointAuthBasicUpdateParam {
+    type: 'client_secret_basic';
+    /**
+     * Updated OAuth client secret.
+     */
+    client_secret?: string | null;
+}
+/**
+ * Token endpoint requires no client authentication.
+ */
+export interface BetaManagedAgentsTokenEndpointAuthNoneParam {
+    type: 'none';
+}
+/**
+ * Token endpoint requires no client authentication.
+ */
+export interface BetaManagedAgentsTokenEndpointAuthNoneResponse {
+    type: 'none';
+}
+/**
+ * Token endpoint uses POST body authentication with client credentials.
+ */
+export interface BetaManagedAgentsTokenEndpointAuthPostParam {
+    /**
+     * OAuth client secret.
+     */
+    client_secret: string;
+    type: 'client_secret_post';
+}
+/**
+ * Token endpoint uses POST body authentication with client credentials.
+ */
+export interface BetaManagedAgentsTokenEndpointAuthPostResponse {
+    type: 'client_secret_post';
+}
+/**
+ * Updated POST body authentication parameters for the token endpoint.
+ */
+export interface BetaManagedAgentsTokenEndpointAuthPostUpdateParam {
+    type: 'client_secret_post';
+    /**
+     * Updated OAuth client secret.
+     */
+    client_secret?: string | null;
+}
+/**
+ * Substitute the secret on any host the session's Environment network policy
+ * permits egress to. The Environment's network policy is the only boundary on
+ * where the secret can reach.
+ */
+export interface BetaManagedAgentsUnrestrictedCredentialNetworkingParams {
+    type: 'unrestricted';
+}
+/**
+ * The secret is substituted on any host the session's Environment network policy
+ * permits egress to.
+ */
+export interface BetaManagedAgentsUnrestrictedCredentialNetworkingResponse {
+    type: 'unrestricted';
+}
+export interface CredentialCreateParams {
+    /**
+     * Body param: Authentication details for creating a credential.
+     */
+    auth: BetaManagedAgentsMCPOAuthCreateParams | BetaManagedAgentsStaticBearerCreateParams | BetaManagedAgentsEnvironmentVariableCreateParams;
+    /**
+     * Body param: Human-readable name for the credential. Up to 255 characters.
+     */
+    display_name?: string | null;
+    /**
+     * Body param: Arbitrary key-value metadata to attach to the credential. Maximum 16
+     * pairs, keys up to 64 chars, values up to 512 chars.
+     */
+    metadata?: {
+        [key: string]: string;
+    };
+    /**
+     * Header param: Optional header to specify the beta version(s) you want to use.
+     */
+    betas?: Array<BetaAPI.AnthropicBeta>;
+}
+export interface CredentialRetrieveParams {
+    /**
+     * Path param: Path parameter vault_id
+     */
+    vault_id: string;
+    /**
+     * Header param: Optional header to specify the beta version(s) you want to use.
+     */
+    betas?: Array<BetaAPI.AnthropicBeta>;
+}
+export interface CredentialUpdateParams {
+    /**
+     * Path param: Path parameter vault_id
+     */
+    vault_id: string;
+    /**
+     * Body param: Updated authentication details for a credential.
+     */
+    auth?: BetaManagedAgentsMCPOAuthUpdateParams | BetaManagedAgentsStaticBearerUpdateParams | BetaManagedAgentsEnvironmentVariableUpdateParams;
+    /**
+     * Body param: Updated human-readable name for the credential. 1-255 characters.
+     */
+    display_name?: string | null;
+    /**
+     * Body param: Metadata patch. Set a key to a string to upsert it, or to null to
+     * delete it. Omitted keys are preserved.
+     */
+    metadata?: {
+        [key: string]: string | null;
+    } | null;
+    /**
+     * Header param: Optional header to specify the beta version(s) you want to use.
+     */
+    betas?: Array<BetaAPI.AnthropicBeta>;
+}
+export interface CredentialListParams extends PageCursorParams {
+    /**
+     * Query param: Whether to include archived credentials in the results.
+     */
+    include_archived?: boolean;
+    /**
+     * Header param: Optional header to specify the beta version(s) you want to use.
+     */
+    betas?: Array<BetaAPI.AnthropicBeta>;
+}
+export interface CredentialDeleteParams {
+    /**
+     * Path param: Path parameter vault_id
+     */
+    vault_id: string;
+    /**
+     * Header param: Optional header to specify the beta version(s) you want to use.
+     */
+    betas?: Array<BetaAPI.AnthropicBeta>;
+}
+export interface CredentialArchiveParams {
+    /**
+     * Path param: Path parameter vault_id
+     */
+    vault_id: string;
+    /**
+     * Header param: Optional header to specify the beta version(s) you want to use.
+     */
+    betas?: Array<BetaAPI.AnthropicBeta>;
+}
+export interface CredentialMCPOAuthValidateParams {
+    /**
+     * Path param: Path parameter vault_id
+     */
+    vault_id: string;
+    /**
+     * Header param: Optional header to specify the beta version(s) you want to use.
+     */
+    betas?: Array<BetaAPI.AnthropicBeta>;
+}
+export declare namespace Credentials {
+    export { type BetaManagedAgentsCredential as BetaManagedAgentsCredential, type BetaManagedAgentsCredentialNetworkingParams as BetaManagedAgentsCredentialNetworkingParams, type BetaManagedAgentsCredentialValidation as BetaManagedAgentsCredentialValidation, type BetaManagedAgentsCredentialValidationStatus as BetaManagedAgentsCredentialValidationStatus, type BetaManagedAgentsDeletedCredential as BetaManagedAgentsDeletedCredential, type BetaManagedAgentsEnvironmentVariableAuthResponse as BetaManagedAgentsEnvironmentVariableAuthResponse, type BetaManagedAgentsEnvironmentVariableCreateParams as BetaManagedAgentsEnvironmentVariableCreateParams, type BetaManagedAgentsEnvironmentVariableUpdateParams as BetaManagedAgentsEnvironmentVariableUpdateParams, type BetaManagedAgentsInjectionLocationParams as BetaManagedAgentsInjectionLocationParams, type BetaManagedAgentsInjectionLocationResponse as BetaManagedAgentsInjectionLocationResponse, type BetaManagedAgentsInjectionLocationUpdateParams as BetaManagedAgentsInjectionLocationUpdateParams, type BetaManagedAgentsLimitedCredentialNetworkingParams as BetaManagedAgentsLimitedCredentialNetworkingParams, type BetaManagedAgentsLimitedCredentialNetworkingResponse as BetaManagedAgentsLimitedCredentialNetworkingResponse, type BetaManagedAgentsMCPOAuthAuthResponse as BetaManagedAgentsMCPOAuthAuthResponse, type BetaManagedAgentsMCPOAuthCreateParams as BetaManagedAgentsMCPOAuthCreateParams, type BetaManagedAgentsMCPOAuthRefreshParams as BetaManagedAgentsMCPOAuthRefreshParams, type BetaManagedAgentsMCPOAuthRefreshResponse as BetaManagedAgentsMCPOAuthRefreshResponse, type BetaManagedAgentsMCPOAuthRefreshUpdateParams as BetaManagedAgentsMCPOAuthRefreshUpdateParams, type BetaManagedAgentsMCPOAuthUpdateParams as BetaManagedAgentsMCPOAuthUpdateParams, type BetaManagedAgentsMCPProbe as BetaManagedAgentsMCPProbe, type BetaManagedAgentsRefreshHTTPResponse as BetaManagedAgentsRefreshHTTPResponse, type BetaManagedAgentsRefreshObject as BetaManagedAgentsRefreshObject, type BetaManagedAgentsStaticBearerAuthResponse as BetaManagedAgentsStaticBearerAuthResponse, type BetaManagedAgentsStaticBearerCreateParams as BetaManagedAgentsStaticBearerCreateParams, type BetaManagedAgentsStaticBearerUpdateParams as BetaManagedAgentsStaticBearerUpdateParams, type BetaManagedAgentsTokenEndpointAuthBasicParam as BetaManagedAgentsTokenEndpointAuthBasicParam, type BetaManagedAgentsTokenEndpointAuthBasicResponse as BetaManagedAgentsTokenEndpointAuthBasicResponse, type BetaManagedAgentsTokenEndpointAuthBasicUpdateParam as BetaManagedAgentsTokenEndpointAuthBasicUpdateParam, type BetaManagedAgentsTokenEndpointAuthNoneParam as BetaManagedAgentsTokenEndpointAuthNoneParam, type BetaManagedAgentsTokenEndpointAuthNoneResponse as BetaManagedAgentsTokenEndpointAuthNoneResponse, type BetaManagedAgentsTokenEndpointAuthPostParam as BetaManagedAgentsTokenEndpointAuthPostParam, type BetaManagedAgentsTokenEndpointAuthPostResponse as BetaManagedAgentsTokenEndpointAuthPostResponse, type BetaManagedAgentsTokenEndpointAuthPostUpdateParam as BetaManagedAgentsTokenEndpointAuthPostUpdateParam, type BetaManagedAgentsUnrestrictedCredentialNetworkingParams as BetaManagedAgentsUnrestrictedCredentialNetworkingParams, type BetaManagedAgentsUnrestrictedCredentialNetworkingResponse as BetaManagedAgentsUnrestrictedCredentialNetworkingResponse, type BetaManagedAgentsCredentialsPageCursor as BetaManagedAgentsCredentialsPageCursor, type CredentialCreateParams as CredentialCreateParams, type CredentialRetrieveParams as CredentialRetrieveParams, type CredentialUpdateParams as CredentialUpdateParams, type CredentialListParams as CredentialListParams, type CredentialDeleteParams as CredentialDeleteParams, type CredentialArchiveParams as CredentialArchiveParams, type CredentialMCPOAuthValidateParams as CredentialMCPOAuthValidateParams, };
+}
+//# sourceMappingURL=credentials.d.mts.map
