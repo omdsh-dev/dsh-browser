@@ -622,6 +622,15 @@ function invokeTarget(call: HostRpcCall): InvokeTarget | { readonly error: HostR
   switch (call.method) {
     case 'session.list':
       return { namespace: 'session', method: 'list', args: { _request: call.payload } }
+    case 'session.models':
+      // Host Typert exposes session/modelCatalog (no args). Adapt ModelCatalog
+      // into the panel's { current, routable, groups } directory shape.
+      return {
+        namespace: 'session',
+        method: 'modelCatalog',
+        args: {},
+        adapt: adaptModelCatalog,
+      }
     case 'session.create':
     case 'session.selectModel':
     case 'session.attachment':
@@ -883,6 +892,43 @@ function sessionIdOf(payload: unknown): string | undefined {
   return typeof payload.sessionId === 'string' && payload.sessionId.length > 0
     ? payload.sessionId
     : undefined
+}
+
+/** Map Host ModelCatalog into the extension's session.models directory shape. */
+function adaptModelCatalog(value: unknown): unknown {
+  if (!isRecord(value)) return value
+  const selection = modelSelectionOf(value.default)
+  const groups = Array.isArray(value.groups) ? value.groups : []
+  const failures = Array.isArray(value.failures) ? value.failures : []
+  const routableProviders = Array.isArray(value.routableProviders)
+    ? value.routableProviders.filter((entry): entry is string => typeof entry === 'string')
+    : []
+  const current = selection ?? { provider: 'none', model: 'none' }
+  return {
+    current,
+    routable: selection !== undefined && routableProviders.includes(selection.provider),
+    groups,
+    failures,
+  }
+}
+
+function modelSelectionOf(value: unknown): {
+  provider: string
+  model: string
+  reasoningEffort?: string
+} | undefined {
+  if (!isRecord(value)) return undefined
+  const provider = typeof value.provider === 'string' ? value.provider.trim() : ''
+  const model = typeof value.model === 'string' ? value.model.trim() : ''
+  if (provider === '' || model === '') return undefined
+  const reasoningEffort = typeof value.reasoningEffort === 'string' && value.reasoningEffort.trim() !== ''
+    ? value.reasoningEffort.trim()
+    : undefined
+  return {
+    provider,
+    model,
+    ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+  }
 }
 
 function badRequest(message: string): HostRpcResult {
