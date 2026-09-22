@@ -838,6 +838,105 @@ describe('dispatchOpenTab', () => {
     expect((answer.result as { text: string }).text).toContain('new page')
   })
 
+  it('opens a background tab when active is false', async () => {
+    const { dispatchOpenTab } = await import('../src/background/tools.ts')
+    const { bindOpenedTabAffinity } = await import('../src/background/open-tab-binding.ts')
+    const { TabAffinityController } = await import('../src/background/tab-affinity.ts')
+    const affinity = new TabAffinityController()
+    affinity.observeActive({
+      tabId: 1,
+      windowId: 9,
+      title: 'Current',
+      url: 'https://current.example/',
+    })
+    affinity.bindInitial({
+      tabId: 1,
+      windowId: 9,
+      title: 'Current',
+      url: 'https://current.example/',
+    }, 'session-bg')
+
+    const runtimeListeners = new Set<(message: unknown, sender: chrome.runtime.MessageSender) => void>()
+    const create = vi.fn(async () => ({ id: 42, windowId: 9, url: '' }))
+    const update = vi.fn(async () => ({ id: 42, windowId: 9, url: 'https://docs.example/' }))
+    const remove = vi.fn(async () => undefined)
+    const sendMessage = vi.fn(async () => ({
+      type: 'DSH_RESULT',
+      text: 'new page',
+    }))
+    const getAllFrames = vi.fn(async () => [{
+      frameId: 0, parentFrameId: -1, documentId: 'doc-42', url: 'https://docs.example/',
+    }])
+    vi.stubGlobal('chrome', {
+      tabs: { create, update, remove, sendMessage, query: vi.fn(async () => []) },
+      scripting: { executeScript: vi.fn(async () => [{ frameId: 0, result: undefined }]) },
+      webNavigation: { getAllFrames },
+      runtime: {
+        onMessage: {
+          addListener: (listener: (message: unknown, sender: chrome.runtime.MessageSender) => void) => {
+            runtimeListeners.add(listener)
+          },
+          removeListener: (listener: (message: unknown, sender: chrome.runtime.MessageSender) => void) => {
+            runtimeListeners.delete(listener)
+          },
+        },
+      },
+    })
+
+    const bindCreatedTab = (chromeTab: chrome.tabs.Tab) => {
+      if (chromeTab.id === undefined) return false
+      return bindOpenedTabAffinity(affinity, {
+        tabId: chromeTab.id,
+        windowId: chromeTab.windowId,
+        title: chromeTab.title ?? '',
+        url: chromeTab.url ?? '',
+      }, { active: false, sessionId: 'session-bg' })
+    }
+    const open = dispatchOpenTab(
+      { id: 'open-bg', name: 'browser_open_tab', args: { url: 'https://docs.example/', active: false } },
+      9,
+      'auto',
+      { maxItems: 60, maxChars: 12_000 },
+      async () => 'approved',
+      undefined,
+      bindCreatedTab,
+      () => true,
+    )
+    await vi.waitFor(() => { expect(runtimeListeners.size).toBe(1) })
+    expect(create).toHaveBeenCalledWith({ active: false, windowId: 9 })
+    for (const listener of runtimeListeners) {
+      listener(
+        { type: 'DSH_CONTENT_READY' },
+        {
+          tab: { id: 42 }, frameId: 0, documentId: 'blank-doc', url: 'about:blank',
+        } as chrome.runtime.MessageSender,
+      )
+    }
+    await Promise.resolve()
+    for (const listener of runtimeListeners) {
+      listener(
+        { type: 'DSH_CONTENT_READY' },
+        {
+          tab: { id: 42 }, frameId: 0, documentId: 'doc-42', url: 'https://docs.example/',
+        } as chrome.runtime.MessageSender,
+      )
+    }
+    const answer = await open
+    expect(answer.ok).toBe(true)
+    expect((answer.result as { text: string }).text).toContain('Opened a new background tab')
+    expect(affinity.snapshot()).toMatchObject({
+      status: 'background',
+      active: { tabId: 1 },
+      controlled: { tabId: 42 },
+    })
+    expect(affinity.resolveTarget('session-bg')).toMatchObject({
+      kind: 'target',
+      tab: { tabId: 42 },
+    })
+    expect(affinity.allowsTarget(42)).toBe(true)
+    expect(affinity.allowsTarget(1)).toBe(false)
+  })
+
   it('rejects non-http URLs before creating a tab', async () => {
     const { dispatchOpenTab } = await import('../src/background/tools.ts')
     const create = vi.fn()
