@@ -49,6 +49,22 @@ function harness(options: {
 }
 
 describe('dsh 0.1.5 Remote Host adapter', () => {
+  it('passes the signal in the fifth argument for DSH Desktop 2.x streams', async () => {
+    const open = vi.fn(async (_endpoint: string, _payload: unknown, uplink: AsyncIterable<unknown>, peer: unknown, signal: AbortSignal) => {
+      expect(typeof uplink[Symbol.asyncIterator]).toBe('function')
+      expect(peer).toBeUndefined()
+      expect(signal).toBeInstanceOf(AbortSignal)
+      return { async *[Symbol.asyncIterator]() { yield { type: 'ready', clientId: 'test', host: {} }; await abortWait(signal) } }
+    })
+    const { api } = harness({ open })
+    const controller = new AbortController()
+    const iterator = api.events(controller.signal)[Symbol.asyncIterator]()
+    const pending = iterator.next()
+    await vi.waitFor(() => expect(open).toHaveBeenCalled())
+    controller.abort()
+    await pending.catch(() => undefined)
+    expect(open.mock.calls[0]?.[4]).toBeInstanceOf(AbortSignal)
+  })
   it('preserves V3 durable streams and orders reconnect baselines before transient frames without advancing the durable cursor', async () => {
     const baseline = {
       revision: 2,

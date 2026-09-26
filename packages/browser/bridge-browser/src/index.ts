@@ -163,7 +163,11 @@ function mountBridge(
     ctx.get('attachments')?.imageLimits,
   )
   const browserContext = new BrowserContextInjector(ctx.agents)
-  ctx.on('agent/session-start', ({ agent }) => {
+  // DSH 0.1.7 replaced `agent/session-start` with `agent/created` as the
+  // startup-driving extension point (agent registered with live session and
+  // completed setup); bind there so deferred sessions still receive their
+  // pending browser snapshot at materialization.
+  ctx.on('agent/created', ({ agent }) => {
     browserContext.activate(agent)
   })
 

@@ -26,7 +26,7 @@ import type { RespondResult } from './protocol.ts'
 /** Structural subset of dsh 0.1.5's Host TypertGateway service. */
 export interface TypertGatewayLike {
   readonly wireStream: {
-    open(endpoint: string, payload: unknown, signal: AbortSignal): Promise<AsyncIterable<unknown>>
+    open(endpoint: string, payload: unknown, signalOrUplink: AbortSignal | AsyncIterable<unknown>, peer?: unknown, signal?: AbortSignal): Promise<AsyncIterable<unknown>>
     failure(error: unknown): HostRpcFailure
   }
   invoke(request: {
@@ -35,6 +35,16 @@ export interface TypertGatewayLike {
     readonly args: Readonly<Record<string, unknown>>
     readonly signal?: AbortSignal
   }): Promise<unknown>
+}
+
+/** DSH Desktop 2.x added an uplink and peer before the stream signal. */
+function openWireStream(gateway: TypertGatewayLike, endpoint: string, payload: unknown, signal: AbortSignal): Promise<AsyncIterable<unknown>> {
+  const open = gateway.wireStream.open
+  if (open.length >= 5) {
+    const uplink = { async *[Symbol.asyncIterator](): AsyncGenerator<unknown> {} }
+    return open(endpoint, payload, uplink, undefined, signal)
+  }
+  return open(endpoint, payload, signal)
 }
 
 /** Structural subset of dsh 0.1.5's Host Connection service. */
@@ -219,7 +229,7 @@ class RemoteHostApi implements BrowserHostApi {
     try {
       const controller = new AbortController()
       const signal = AbortSignal.any([call.signal, controller.signal])
-      const source = await this.gateway.wireStream.open('workspace/follow', { args: {} }, signal)
+      const source = await openWireStream(this.gateway, 'workspace/follow', { args: {} }, signal)
       const iterator = source[Symbol.asyncIterator]()
       try {
         const first = await iterator.next()
@@ -384,7 +394,7 @@ class EventGeneration {
     this.followedSessionId = sessionId
     const signal = AbortSignal.any([this.signal, callSignal, controller.signal])
     try {
-      const source = await this.gateway.wireStream.open(
+      const source = await openWireStream(this.gateway,
         'session/follow',
         {
           args: {
@@ -491,7 +501,7 @@ class EventGeneration {
 
   private async pumpRemoteEvents(): Promise<void> {
     try {
-      const source = await this.gateway.wireStream.open('$events', { args: {} }, this.signal)
+      const source = await openWireStream(this.gateway, '$events', { args: {} }, this.signal)
       let ready = false
       for await (const value of source) {
         if (!ready) {
@@ -684,7 +694,7 @@ async function oneShotSessionSnapshot(
 ): Promise<SessionSnapshot> {
   const controller = new AbortController()
   const signal = AbortSignal.any([outerSignal, controller.signal])
-  const source = await gateway.wireStream.open(
+  const source = await openWireStream(gateway,
     'session/follow',
     {
       args: {
