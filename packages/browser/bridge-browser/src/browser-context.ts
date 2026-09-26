@@ -61,9 +61,12 @@ export function createBrowserSnapshotMessage(snapshot: string): UserMessage {
 /** Supersede pending tab context through the durable Inbox command surface. */
 function injectLatestSnapshot(agent: Agent, snapshot: string): void {
   for (const message of agent.inbox.nextStep) {
-    if ((message.source.kind === 'plugin' || message.source.kind === 'plugin:@yuxianglin/dsh-bridge-browser')
-      && message.source.plugin === BROWSER_CONTEXT_PLUGIN
-      && message.source.form === 'snapshot') {
+    // Widened read: `kind: 'plugin'` is retired in the v4 source union, but
+    // legacy messages injected under DSH 0.1.5 may still carry it.
+    const source = message.source as { kind?: string; plugin?: string; form?: string }
+    if ((source.kind === 'plugin' || source.kind === 'plugin:@yuxianglin/dsh-bridge-browser')
+      && source.plugin === BROWSER_CONTEXT_PLUGIN
+      && source.form === 'snapshot') {
       agent.inbox.remove(message.id)
     }
   }
