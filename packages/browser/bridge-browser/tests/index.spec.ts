@@ -58,8 +58,10 @@ describe('config', () => {
       ...VALID,
       sessionWorkspacePath: dshHomePath('browser-sessions'),
       deferSessionCreate: true,
+      advancedTools: false,
     })
     expect(new Config().sessionWorkspacePath).toBe(dshHomePath('browser-sessions'))
+    expect(new Config().advancedTools).toBe(false)
   })
 
   it('preserves explicit values and the empty-string workspace opt-out', () => {
@@ -70,6 +72,7 @@ describe('config', () => {
       maxInteractiveItems: 3,
       sessionWorkspacePath: '',
       deferSessionCreate: false,
+      advancedTools: true,
     })).toEqual({
       token: 'fixed',
       toolTimeoutMs: 1,
@@ -77,6 +80,7 @@ describe('config', () => {
       maxInteractiveItems: 3,
       sessionWorkspacePath: '',
       deferSessionCreate: false,
+      advancedTools: true,
     })
     expect(new Config({ sessionWorkspacePath: '' }).sessionWorkspacePath).toBe('')
   })

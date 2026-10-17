@@ -49,11 +49,11 @@ Playwright / 扩展的配对耗时比为 **1.24**（95% CI **1.16–1.34**）：
 
 | 能力 | 工具 | 说明 |
 |---|---|---|
-| 读取页面 | `browser_snapshot` | 结构化文本快照：标题/URL/正文/编号交互清单/表单字段（敏感值掩码）；`delta: true` 只返回变化 |
-| 点击元素 | `browser_click` | 按编号点击链接/按钮/复选框等 |
+| 读取页面 | `browser_snapshot` | 结构化文本快照：标题/URL/正文/内部滚动区域/编号交互清单/表单字段（敏感值掩码）；`delta: true` 只返回变化 |
+| 点击元素 | `browser_click` | 按编号点击链接/按钮/复选框等；也可用 CSS 选择器或可见文本定位——分页这类没有编号的 JS 控件因此可点 |
 | 填写表单 | `browser_type` | 输入文本（React/Vue 受控组件兼容），`replace` 清空重填 |
-| 按键 | `browser_press` | 键盘事件（Enter/Tab/Escape/方向键…） |
-| 滚动 | `browser_scroll` | 视口滚动（up/down/top/bottom） |
+| 按键 | `browser_press` | 键盘事件（Enter/Tab/Escape/方向键…），`modifiers` 支持 Control/Meta/Shift/Alt 组合键 |
+| 滚动 | `browser_scroll` | 视口滚动，或按快照中标注的选择器操作页面内部滚动容器 |
 | 页面导航 | `browser_navigate` / `browser_open_tab` / `browser_back` / `browser_forward` / `browser_reload` | 受控标签页内导航，或新开标签页并跟随（`active:false` 时保持当前页在前台） |
 | 列出标签页 | `browser_list_tabs` | 列出可访问标签页的稳定 ID、标题、URL、窗口/顺序以及活动/受控状态 |
 | 跟随标签页 | `browser_follow_tab` | 将后续浏览器工具绑定到 `browser_list_tabs` 返回的标签页，而不激活该标签页 |
@@ -62,6 +62,18 @@ Playwright / 扩展的配对耗时比为 **1.24**（95% CI **1.16–1.34**）：
 | 等待稳定 | `browser_wait` | 页面加载与渲染稳定检测 |
 | 发送图片 | `session.prompt` / `session.attachment` | 按宿主能力启用图片草稿、纯图片消息和持久历史预览 |
 | 引用选中内容 | 侧栏输入框 | 在页面里划选的文字会出现在输入框，随下一条消息一起发送，并带上来源与不可信内容边界 |
+
+### 高级工具（默认关闭）
+
+页面存储、以页面身份发请求、页面主世界 JavaScript 不属于默认工具集。在桥插件配置里设置 `advancedTools: true` 才会注册：
+
+| 能力 | 工具 | 说明 |
+|---|---|---|
+| 读取页面存储 | `browser_get_storage` | `localStorage`/`sessionStorage`；批量列举会掩码疑似凭据的值，显式指定 key 才返回明文 |
+| 以页面身份请求 | `browser_fetch` | 携带页面 Cookie 的 method/headers/body；同源 API 直接可用，跨源仍受 CORS 限制 |
+| 执行页面 JavaScript | `browser_eval` | 主世界执行并返回 JSON；异步结果最多轮询 3 秒；严格 CSP 页面会拒绝 eval |
+
+每次高级调用仍需在侧栏审批，返回值一律包在不可信内容边界内。
 
 ## 组成
 
@@ -78,7 +90,7 @@ scripts/install.ps1
 - **使用你的真实浏览器，而不是无头副本**：模型操作你已经打开的页面，登录态、会话和 Cookie 均会保留。
 - **纯文本页面接口**：编号控件、跨快照稳定 ID、delta 更新和敏感值掩码，使模型无需截图也能操作页面；用户主动添加的对话图片走 dsh 独立的多模态消息通道。
 - **用「指」代替「描述」**：直接划选你要问的那段文字，侧栏会把它引用下来，说「解释这个」不必再描述整页内容。只有侧栏打开时才会捕获，并且在你发送消息之前不会离开浏览器。
-- **收窄隐私边界**：密码和支付卡字段始终显示为 `••••`，字段值不会离开页面。
+- **收窄隐私边界**：密码和支付卡字段始终显示为 `••••`，字段值不会离开页面。读页面存储、以页面身份发请求、执行页面 JavaScript 都需要显式开启（`advancedTools`）并逐次审批。
 - **受保护的桥连接**：远程连接使用认证握手，特权网关方法拒绝非回环调用方，扩展把工具绑定到一个由用户控制的标签页。
 
 ## 详细安装与使用

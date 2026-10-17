@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import type { BridgeServer } from '../src/server.ts'
-import { BROWSER_TOOL_NAMES, registerBrowserTools } from '../src/tools.ts'
+import { ADVANCED_BROWSER_TOOL_NAMES, BASE_BROWSER_TOOL_NAMES, BROWSER_TOOL_NAMES, registerBrowserTools } from '../src/tools.ts'
 
 describe('registerBrowserTools', () => {
   function makeHarness() {
@@ -21,11 +21,25 @@ describe('registerBrowserTools', () => {
     return { ctx, bridge, requestTool, registered }
   }
 
-  it('registers the full v1 tool set', () => {
+  it('registers only the base tool set unless advanced tools are enabled', () => {
     const { ctx, bridge, registered } = makeHarness()
     const disposers = registerBrowserTools(ctx, bridge, { toolTimeoutMs: 1_000, snapshotMaxChars: 12_000, maxInteractiveItems: 60 })
+    expect(registered.map((r) => r.name).sort()).toEqual([...BASE_BROWSER_TOOL_NAMES].sort())
+    expect(disposers.size).toBe(BASE_BROWSER_TOOL_NAMES.length)
+    for (const dispose of disposers.values()) dispose()
+  })
+
+  it('registers the full tool set when advanced tools are enabled', () => {
+    const { ctx, bridge, registered } = makeHarness()
+    const disposers = registerBrowserTools(ctx, bridge, {
+      toolTimeoutMs: 1_000,
+      snapshotMaxChars: 12_000,
+      maxInteractiveItems: 60,
+      advancedTools: true,
+    })
     expect(registered.map((r) => r.name).sort()).toEqual([...BROWSER_TOOL_NAMES].sort())
     expect(disposers.size).toBe(BROWSER_TOOL_NAMES.length)
+    expect(registered.map((r) => r.name)).toEqual(expect.arrayContaining([...ADVANCED_BROWSER_TOOL_NAMES]))
     for (const dispose of disposers.values()) dispose()
   })
 
@@ -74,12 +88,19 @@ describe('registerBrowserTools', () => {
 
   it('executes every remaining tool with mapped args', async () => {
     const { ctx, bridge, requestTool, registered } = makeHarness()
-    registerBrowserTools(ctx, bridge, { toolTimeoutMs: 1_000, snapshotMaxChars: 12_000, maxInteractiveItems: 60 })
+    registerBrowserTools(ctx, bridge, { toolTimeoutMs: 1_000, snapshotMaxChars: 12_000, maxInteractiveItems: 60, advancedTools: true })
     const byName = new Map(registered.map((r) => [r.name, r.definition]))
     const exec = { signal: new AbortController().signal }
     const run = async (name: string, args: unknown): Promise<void> => {
       await (byName.get(name)!.execute as (a: unknown, e: { signal: AbortSignal }) => Promise<unknown>)(args, exec)
     }
+
+    await run('browser_click', { index: 3, frame: 2 })
+    expect(requestTool).toHaveBeenLastCalledWith('browser_click', { index: 3, frame: 2 }, exec.signal, 1_000)
+    await run('browser_click', { selector: 'nav.pager > a:nth-of-type(3)' })
+    expect(requestTool).toHaveBeenLastCalledWith('browser_click', { selector: 'nav.pager > a:nth-of-type(3)' }, exec.signal, 1_000)
+    await run('browser_click', { text: 'Next', role: 'button', nth: 1 })
+    expect(requestTool).toHaveBeenLastCalledWith('browser_click', { text: 'Next', role: 'button', nth: 1 }, exec.signal, 1_000)
 
     await run('browser_type', { index: 2, text: 'hello' })
     expect(requestTool).toHaveBeenLastCalledWith('browser_type', { index: 2, text: 'hello' }, exec.signal, 1_000)
@@ -90,6 +111,8 @@ describe('registerBrowserTools', () => {
 
     await run('browser_press', { key: 'Enter' })
     expect(requestTool).toHaveBeenLastCalledWith('browser_press', { key: 'Enter' }, exec.signal, 1_000)
+    await run('browser_press', { key: 'Enter', modifiers: ['ctrl'] })
+    expect(requestTool).toHaveBeenLastCalledWith('browser_press', { key: 'Enter', modifiers: ['ctrl'] }, exec.signal, 1_000)
 
     await run('browser_scroll', { direction: 'down', amount: 200 })
     expect(requestTool).toHaveBeenLastCalledWith('browser_scroll', { direction: 'down', amount: 200 }, exec.signal, 1_000)
@@ -97,6 +120,30 @@ describe('registerBrowserTools', () => {
     expect(requestTool).toHaveBeenLastCalledWith('browser_scroll', { direction: 'top' }, exec.signal, 1_000)
     await run('browser_scroll', { direction: 'down', frame: 4 })
     expect(requestTool).toHaveBeenLastCalledWith('browser_scroll', { direction: 'down', frame: 4 }, exec.signal, 1_000)
+    await run('browser_scroll', { direction: 'bottom', selector: '#content' })
+    expect(requestTool).toHaveBeenLastCalledWith('browser_scroll', { direction: 'bottom', selector: '#content' }, exec.signal, 1_000)
+    await run('browser_scroll', { direction: 'down', index: 12 })
+    expect(requestTool).toHaveBeenLastCalledWith('browser_scroll', { direction: 'down', index: 12 }, exec.signal, 1_000)
+
+    await run('browser_get_storage', { area: 'session', key: 'token' })
+    expect(requestTool).toHaveBeenLastCalledWith('browser_get_storage', { area: 'session', key: 'token' }, exec.signal, 1_000)
+    await run('browser_get_storage', {})
+    expect(requestTool).toHaveBeenLastCalledWith('browser_get_storage', {}, exec.signal, 1_000)
+
+    await run('browser_fetch', { url: '/api/lines?page=2', method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"id":7}' })
+    expect(requestTool).toHaveBeenLastCalledWith(
+      'browser_fetch',
+      { url: '/api/lines?page=2', method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"id":7}' },
+      exec.signal,
+      1_000,
+    )
+    await run('browser_fetch', { url: 'https://example.com/api' })
+    expect(requestTool).toHaveBeenLastCalledWith('browser_fetch', { url: 'https://example.com/api' }, exec.signal, 1_000)
+
+    await run('browser_eval', { code: 'document.title' })
+    expect(requestTool).toHaveBeenLastCalledWith('browser_eval', { code: 'document.title' }, exec.signal, 1_000)
+    await run('browser_eval', { code: 'location.href', frame: 4 })
+    expect(requestTool).toHaveBeenLastCalledWith('browser_eval', { code: 'location.href', frame: 4 }, exec.signal, 1_000)
 
     await run('browser_navigate', { url: 'https://example.com' })
     expect(requestTool).toHaveBeenLastCalledWith('browser_navigate', { url: 'https://example.com' }, exec.signal, 1_000)
@@ -139,7 +186,7 @@ describe('registerBrowserTools', () => {
 
   it('normalizes every DSH parameter map to JSON Schema before registration', () => {
     const { ctx, bridge, registered } = makeHarness()
-    registerBrowserTools(ctx, bridge, { toolTimeoutMs: 1_000, snapshotMaxChars: 12_000, maxInteractiveItems: 60 })
+    registerBrowserTools(ctx, bridge, { toolTimeoutMs: 1_000, snapshotMaxChars: 12_000, maxInteractiveItems: 60, advancedTools: true })
     for (const { definition } of registered) {
       const params = definition.parameters as { type?: unknown; properties?: unknown }
       expect(params.type).toBe('object')
@@ -149,8 +196,16 @@ describe('registerBrowserTools', () => {
       properties: Record<string, unknown>
       required?: string[]
     }
+    // Three addressing modes: none of them may be required on its own.
     expect(click.properties.index).toBeDefined()
-    expect(click.required).toContain('index')
+    expect(click.properties.selector).toBeDefined()
+    expect(click.properties.text).toBeDefined()
+    expect(click.required ?? []).not.toContain('index')
+    const typeTool = registered.find(({ name }) => name === 'browser_type')!.definition.parameters as {
+      required?: string[]
+    }
+    expect(typeTool.required).toContain('index')
+    expect(typeTool.required).toContain('text')
   })
 
   it('declares cooperative timeoutMs on every tool', () => {
@@ -174,15 +229,25 @@ describe('registerBrowserTools', () => {
   it('keeps model-facing tool descriptions concise', () => {
     const { ctx, bridge, registered } = makeHarness()
     registerBrowserTools(ctx, bridge, { toolTimeoutMs: 5_000, snapshotMaxChars: 12_000, maxInteractiveItems: 60 })
-    const descriptionChars = registered.reduce((sum, { definition }) => sum + String(definition.description).length, 0)
-    expect(descriptionChars).toBeLessThan(1_500)
+    const baseChars = registered.reduce((sum, { definition }) => sum + String(definition.description).length, 0)
+    expect(baseChars).toBeLessThan(1_700)
+
+    const { ctx: advancedCtx, bridge: advancedBridge, registered: advancedRegistered } = makeHarness()
+    registerBrowserTools(advancedCtx, advancedBridge, {
+      toolTimeoutMs: 5_000,
+      snapshotMaxChars: 12_000,
+      maxInteractiveItems: 60,
+      advancedTools: true,
+    })
+    const allChars = advancedRegistered.reduce((sum, { definition }) => sum + String(definition.description).length, 0)
+    expect(allChars).toBeLessThan(2_200)
   })
 
   it('exposes optional frame routing on frame-local tools only', () => {
     const { ctx, bridge, registered } = makeHarness()
-    registerBrowserTools(ctx, bridge, { toolTimeoutMs: 5_000, snapshotMaxChars: 12_000, maxInteractiveItems: 60 })
+    registerBrowserTools(ctx, bridge, { toolTimeoutMs: 5_000, snapshotMaxChars: 12_000, maxInteractiveItems: 60, advancedTools: true })
     const byName = new Map(registered.map((entry) => [entry.name, entry.definition]))
-    for (const name of ['browser_click', 'browser_type', 'browser_press', 'browser_scroll', 'browser_get_text', 'browser_wait']) {
+    for (const name of ['browser_click', 'browser_type', 'browser_press', 'browser_scroll', 'browser_get_text', 'browser_wait', 'browser_get_storage', 'browser_fetch', 'browser_eval']) {
       const params = byName.get(name)!.parameters as { properties: { frame?: { type?: unknown } } }
       expect(params.properties.frame?.type).toBe('number')
     }

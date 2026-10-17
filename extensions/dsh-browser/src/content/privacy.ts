@@ -49,3 +49,34 @@ export function isSensitiveField(el: Element): boolean {
 export function maskValue(value: string): string {
   return value.length === 0 ? '' : '••••'
 }
+
+/** Storage key fragments that usually carry a bearer credential. */
+const SENSITIVE_KEY_PATTERNS = [
+  /token/i,
+  /secret/i,
+  /passw/i,
+  /pwd/i,
+  /auth/i,
+  /credential/i,
+  /bearer/i,
+  /jwt/i,
+  /api[-_]?key/i,
+  /access[-_]?key/i,
+  /private[-_]?key/i,
+  /refresh/i,
+]
+
+/**
+ * Whether a storage key looks like it holds a credential.
+ *
+ * Enumerating a storage area is a bulk read, so a value that merely *looks*
+ * like a secret is masked there. Naming the key explicitly in
+ * `browser_get_storage` opts into the real value, which is the documented
+ * escape hatch for callers that actually need the token.
+ *
+ * @param key - storage key name.
+ * @returns true when the value should be masked in a bulk listing.
+ */
+export function isSensitiveStorageKey(key: string): boolean {
+  return SENSITIVE_KEY_PATTERNS.some((pattern) => pattern.test(key))
+}

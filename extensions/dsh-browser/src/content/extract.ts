@@ -194,3 +194,184 @@ export function pageText(root?: Element | null): string {
   if (source === null || source === undefined) return ''
   return clean(elementText(source))
 }
+
+/** Which axes of one element hold more content than it currently shows. */
+export interface Scrollability {
+  vertical: boolean
+  horizontal: boolean
+}
+
+/** CSS overflow values that make a scroll container user-scrollable. */
+const SCROLLABLE_OVERFLOW = /(auto|scroll|overlay)/
+
+/**
+ * Whether an element is an inner scroll container: it clips overflowing
+ * content and its overflow allows scrolling.
+ *
+ * App-shell layouts put the real document in a `div` and keep `body`
+ * non-scrolling, so this is the test the page-level `window.scrollBy` path
+ * misses.
+ *
+ * @param el - candidate element.
+ * @returns per-axis scrollability.
+ */
+export function scrollabilityOf(el: Element): Scrollability {
+  const verticalOverflow = el.scrollHeight > el.clientHeight + 4
+  const horizontalOverflow = el.scrollWidth > el.clientWidth + 4
+  if (!verticalOverflow && !horizontalOverflow) return { vertical: false, horizontal: false }
+  const style = getComputedStyle(el)
+  return {
+    // A `hidden` axis still supports programmatic `scrollTop`/`scrollLeft`, but
+    // annotating it as a scroll region would invite pointless scrolling.
+    vertical: verticalOverflow && SCROLLABLE_OVERFLOW.test(style.overflowY),
+    horizontal: horizontalOverflow && SCROLLABLE_OVERFLOW.test(style.overflowX),
+  }
+}
+
+/**
+ * The nearest inner scroll container at or above an element.
+ * @param el - starting element.
+ * @returns the scrollable element, or undefined when only the window scrolls.
+ */
+export function findScrollableContainer(el: Element): Element | undefined {
+  for (let node: Element | null = el; node !== null; node = node.parentElement) {
+    if (node === document.body || node === document.documentElement) return undefined
+    const scroll = scrollabilityOf(node)
+    if (scroll.vertical || scroll.horizontal) return node
+  }
+  return undefined
+}
+
+/** One inner scroll region, as rendered into the snapshot. */
+export interface ScrollableRegionView {
+  /** CSS selector that resolves to this element right now. */
+  selector: string
+  /** Short human/model-readable identity (aria-label, id, role, tag). */
+  label: string
+  /** True when the horizontal axis is the one with content left. */
+  horizontal: boolean
+  /** 0–100, rounded. */
+  percent: number
+  /** Pixels still scrollable in the reported axis. */
+  remaining: number
+}
+
+/** Where a scroll container currently sits in its scrollable range. */
+export interface ScrollPosition {
+  percent: number
+  remaining: number
+  atStart: boolean
+  atEnd: boolean
+}
+
+/**
+ * Read a container's current scroll position.
+ * @param el - scroll container.
+ * @param horizontal - report the horizontal axis instead of the vertical one.
+ * @returns rounded position facts.
+ */
+export function scrollPositionOf(el: Element, horizontal = false): ScrollPosition {
+  const available = horizontal
+    ? el.scrollWidth - el.clientWidth
+    : el.scrollHeight - el.clientHeight
+  const position = horizontal ? el.scrollLeft : el.scrollTop
+  if (available <= 0) return { percent: 100, remaining: 0, atStart: true, atEnd: true }
+  const clamped = Math.max(0, Math.min(available, position))
+  const remaining = Math.max(0, available - clamped)
+  return {
+    percent: Math.round((clamped / available) * 100),
+    remaining: Math.round(remaining),
+    atStart: clamped <= 1,
+    atEnd: remaining <= 1,
+  }
+}
+
+/**
+ * Short identity for a scroll container. Container text is unbounded, so this
+ * never falls back to `textContent` (a whole page would leak into one line).
+ * @param el - scroll container.
+ * @returns a clean label of at most 48 characters.
+ */
+export function scrollRegionLabel(el: Element): string {
+  const aria = el.getAttribute('aria-label')
+  if (aria !== null && aria.trim() !== '') return truncate(clean(aria), 48).text
+  if (el.id !== '') return truncate(`#${el.id}`, 48).text
+  const role = el.getAttribute('role')
+  if (role !== null && role !== '') return truncate(role, 48).text
+  const className = typeof el.className === 'string' ? el.className.trim().split(/\s+/)[0] : undefined
+  const tag = el.tagName.toLowerCase()
+  return truncate(className === undefined || className === '' ? tag : `${tag}.${className}`, 48).text
+}
+
+/**
+ * Build a selector that currently resolves to exactly one element.
+ *
+ * The model passes this selector back to `browser_scroll`, so it only has to
+ * be unique for the snapshot it came from; ids and `nth-of-type` chains cover
+ * the common cases without inventing a parallel addressing scheme.
+ *
+ * @param el - target element.
+ * @param maxDepth - ancestor levels to consider before giving up.
+ * @returns a CSS selector (best effort).
+ */
+export function cssPath(el: Element, maxDepth = 24): string {
+  const parts: string[] = []
+  let node: Element | null = el
+  for (let depth = 0; node !== null && node !== document.documentElement && depth < maxDepth; depth += 1) {
+    if (node.id !== '') {
+      const idSelector = `#${cssEscape(node.id)}`
+      if (document.querySelectorAll(idSelector).length === 1) {
+        parts.unshift(idSelector)
+        return parts.join(' > ')
+      }
+    }
+    const parent: Element | null = node.parentElement
+    if (parent === null) break
+    const sameTag = [...parent.children].filter((child) => child.tagName === node!.tagName)
+    parts.unshift(`${node.tagName.toLowerCase()}:nth-of-type(${sameTag.indexOf(node) + 1})`)
+    const candidate = parts.join(' > ')
+    if (document.querySelectorAll(candidate).length === 1) return candidate
+    node = parent
+  }
+  return parts.join(' > ')
+}
+
+/** Upper bound on elements inspected for scroll regions in one snapshot. */
+const MAX_SCROLL_SCAN = 6_000
+
+/**
+ * Find the inner scroll containers worth telling the model about.
+ *
+ * `body`/`documentElement` are excluded because `browser_scroll` without a
+ * target already moves the window. Nested containers are kept: an app shell
+ * often scrolls its sidebar and its content pane independently.
+ *
+ * @param root - document or subtree to scan.
+ * @param limit - maximum regions returned.
+ * @returns regions in document order.
+ */
+export function collectScrollableRegions(root: Document | Element, limit = 5): ScrollableRegionView[] {
+  const regions: ScrollableRegionView[] = []
+  let inspected = 0
+  for (const el of root.querySelectorAll('*')) {
+    if (inspected >= MAX_SCROLL_SCAN) break
+    inspected += 1
+    if (el === document.body || el === document.documentElement) continue
+    if (!(el instanceof HTMLElement)) continue
+    if (el.clientHeight === 0 && el.clientWidth === 0) continue
+    const scroll = scrollabilityOf(el)
+    if (!scroll.vertical && !scroll.horizontal) continue
+    if (!isVisible(el)) continue
+    const horizontal = !scroll.vertical && scroll.horizontal
+    const position = scrollPositionOf(el, horizontal)
+    regions.push({
+      selector: cssPath(el),
+      label: scrollRegionLabel(el),
+      horizontal,
+      percent: position.percent,
+      remaining: position.remaining,
+    })
+    if (regions.length >= limit) break
+  }
+  return regions
+}

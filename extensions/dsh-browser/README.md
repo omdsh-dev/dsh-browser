@@ -10,11 +10,11 @@ The **browser-operation end** of dsh: the model reads and operates the browser p
 
 | Capability | Action | Notes |
 |---|---|---|
-| Read page | `browser_snapshot` | Title/URL/main text/numbered inventory/form fields (sensitive values masked); `delta: true` returns only changes |
-| Click element | `browser_click` | Click by inventory number (links/buttons/checkboxes…), React/Vue compatible |
+| Read page | `browser_snapshot` | Title/URL/main text/scroll regions/numbered inventory/form fields (sensitive values masked); `delta: true` returns only changes |
+| Click element | `browser_click` | Click by inventory number, CSS selector, or visible text; `role`/`nth` disambiguate. Reaches JS-only controls that never get a number |
 | Fill forms | `browser_type` | Type text; `replace` clears first |
-| Keys | `browser_press` | Enter/Tab/Escape/arrows etc. |
-| Scroll | `browser_scroll` | Viewport scrolling (up/down/top/bottom) |
+| Keys | `browser_press` | Enter/Tab/Escape/arrows etc., with optional `modifiers` for Control/Meta/Shift/Alt combinations |
+| Scroll | `browser_scroll` | Viewport scrolling, or an inner scroll container addressed by a snapshot selector or element index |
 | Navigate | `browser_navigate` / `browser_open_tab` / `browser_back` / `browser_forward` / `browser_reload` | Navigation inside the controlled tab, or open a URL in a new tab and follow it |
 | List tabs | `browser_list_tabs` | List accessible tabs with stable IDs, titles, URLs, and active/controlled state |
 | Follow tab | `browser_follow_tab` | Bind later browser tools to a listed tab without activating it |
@@ -23,6 +23,16 @@ The **browser-operation end** of dsh: the model reads and operates the browser p
 | Wait | `browser_wait` | Page load and render-settle detection |
 | Chat with images | `session.prompt` / `session.attachment` | Host-gated image selection, image-only sends, and durable history previews |
 | Quote what you highlight | side panel composer | The text you select in the page becomes a quote in the composer and rides along with your next message |
+
+Advanced, opt-in (enable `advancedTools: true` in the bridge plugin config):
+
+| Capability | Action | Notes |
+|---|---|---|
+| Read page storage | `browser_get_storage` | localStorage/sessionStorage; bulk listings mask credential-looking values, naming a key reads it unmasked |
+| Request as the page | `browser_fetch` | Method/headers/body with page cookies; same-origin works directly, cross-origin obeys CORS |
+| Run page JavaScript | `browser_eval` | Main-world evaluation returning JSON; async results polled up to 3s; strict-CSP pages reject eval |
+
+Every advanced call asks for approval and returns its payload inside the untrusted-content boundary.
 
 ## Architecture
 
@@ -128,5 +138,7 @@ Chrome uses `sidePanel`; Firefox uses `sidebar_action`. Both request `storage` (
 - Accessible cross-origin iframes are snapshotted and operated with stable `(frame, index)` addresses. Restricted or short-lived frames are reported as unavailable without failing the whole page snapshot.
 - Captcha/image-only controls cannot be handled — the tool result reports "elements with no accessible name" and asks the user to complete that step manually.
 - No automatic token rotation.
-- Synthetic `browser_press` events do not trigger browser-native default actions such as Tab focus movement, arrow-key scrolling, or Enter activation; use manual input when a workflow depends on those defaults.
+- Synthetic `browser_press` events do not trigger browser-native default actions such as Tab focus movement, arrow-key scrolling, or Enter activation; use manual input when a workflow depends on those defaults. Modifier combinations reach page handlers but cannot trigger reserved shortcuts (Ctrl+T, Ctrl+W) or native editing defaults (Ctrl+A, Ctrl+C).
+- `browser_eval` is subject to the page's CSP and cannot preempt a page script that loops forever; that tab must be closed manually.
+- `browser_fetch` sends requests from the page origin, so cross-origin calls are bounded by the page's CORS policy, and it is never covered by persistent origin trust.
 - `browser_wait` considers page load plus a fixed quiet window, but does not observe continuously changing DOM state; a live-updating SPA may be reported as stable.

@@ -80,7 +80,28 @@ const STATE_CHANGING_PAGE_TOOLS = new Set([
   'browser_back',
   'browser_forward',
   'browser_reload',
+  'browser_fetch',
 ])
+/** Tools whose page-authored payload must cross the untrusted-content boundary. */
+const UNTRUSTED_RESULT_TOOLS = new Set([
+  'browser_get_text',
+  'browser_get_storage',
+  'browser_fetch',
+])
+/** Tools that read or expose page content, blocked when the user disabled sharing. */
+const PAGE_CONTENT_TOOLS = new Set([
+  'browser_snapshot',
+  'browser_get_text',
+  'browser_get_storage',
+  'browser_eval',
+  'browser_fetch',
+])
+/** Upper bound on code accepted by browser_eval. */
+const EVAL_MAX_CODE_CHARS = 20_000
+/** Poll cadence while an async page evaluation settles. */
+const EVAL_POLL_INTERVAL_MS = 100
+/** Poll attempts before reporting that the evaluation is still running. */
+const EVAL_POLL_ATTEMPTS = 30
 /** Tools that operate on the browser tab collection rather than one page document. */
 export const TAB_MANAGEMENT_TOOL_NAMES = new Set([
   'browser_list_tabs',
@@ -500,7 +521,7 @@ async function dispatchOnce(
   } else {
     navigationWait?.cancel()
   }
-  if (call.name === 'browser_get_text') {
+  if (UNTRUSTED_RESULT_TOOLS.has(call.name)) {
     return { ok: true, result: { text: wrapUntrustedContent(text, budget.maxChars) } }
   }
   const pageContent = requestPageDelta ? answerPageContent(response) : undefined
@@ -689,7 +710,7 @@ export async function dispatchToolCall(
   // Privacy boundary: with sharing off, no page content may leave the page.
   if (!tabManagement.unrestrictedAccess
     && sharePageContent === 'off'
-    && (call.name === 'browser_snapshot' || call.name === 'browser_get_text')) {
+    && PAGE_CONTENT_TOOLS.has(call.name)) {
     return { ok: false, error: { code: 'action-failed', message: 'Page content sharing is disabled in Settings > Page content sharing.' } }
   }
   const tab = targetTab ?? (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]
@@ -736,6 +757,9 @@ export async function dispatchToolCall(
   if (!isInjectablePage(tab.url)) {
     return await dispatchTabNativeTool(tab.id, tab.url, tab.title, tab.windowId, call, effectiveBudget, signal, targetStillAllowed, tabManagement.commitAction)
       ?? unavailable('The current page DOM is protected by the browser.')
+  }
+  if (call.name === 'browser_eval') {
+    return dispatchEvalTool(tab.id, executionFrames, call, effectiveBudget, signal, targetStillAllowed, tabManagement.commitAction)
   }
   try {
     return await dispatchOnce(
@@ -796,6 +820,195 @@ export async function dispatchToolCall(
   }
 }
 
+/** Envelope returned by the main-world evaluation entry points. */
+interface EvalEnvelope {
+  ok?: boolean
+  json?: string
+  error?: string
+  pending?: boolean
+  key?: string
+}
+
+function isEvalEnvelope(value: unknown): value is EvalEnvelope {
+  return typeof value === 'object' && value !== null
+}
+
+/** First injected result, when the browser returned one. */
+function firstInjectionResult(injected: Array<{ result?: unknown }> | undefined): EvalEnvelope | undefined {
+  const result = injected?.[0]?.result
+  return isEvalEnvelope(result) ? result : undefined
+}
+
+/**
+ * Runs inside the page's MAIN world. It must be self-contained: Chrome
+ * serializes this function's source, so it cannot close over extension scope.
+ * Page CSP applies to `eval`, so a strict page reports a clear error instead of
+ * silently doing nothing.
+ *
+ * @param code - caller-supplied expression or statements.
+ * @param key - page-global slot used to park an async result.
+ * @returns a JSON-serializable envelope.
+ */
+function pageEvalEntry(code: string, key: string): unknown {
+  const host = globalThis as unknown as Record<string, unknown>
+  const serialize = (value: unknown, depth: number): string => {
+    if (value === undefined) return 'undefined'
+    if (value === null) return 'null'
+    const type = typeof value
+    if (type === 'string') return JSON.stringify(value)
+    if (type === 'number' || type === 'boolean') return String(value)
+    if (type === 'bigint') return `${String(value)}n`
+    if (type === 'function') return `[function ${(value as { name?: string }).name ?? ''}]`
+    if (type === 'symbol') return String(value)
+    if (depth >= 4) return '[depth limit]'
+    if (Array.isArray(value)) {
+      const items = value.slice(0, 100).map((item) => serialize(item, depth + 1))
+      return `[${items.join(', ')}${value.length > 100 ? ', …' : ''}]`
+    }
+    if (typeof Node !== 'undefined' && value instanceof Node) {
+      return `<${(value as Node).nodeName.toLowerCase()}>`
+    }
+    const record = value as Record<string, unknown>
+    const keys = Object.keys(record)
+    const rendered = keys.slice(0, 100)
+      .map((name) => `${JSON.stringify(name)}: ${serialize(record[name], depth + 1)}`)
+    return `{${rendered.join(', ')}${keys.length > 100 ? ', …' : ''}}`
+  }
+  try {
+    // Indirect eval runs in the page's global scope, which is the point: the
+    // caller wants page variables and page functions, not isolated-world state.
+    // Expression form keeps synchronous calls synchronous; a syntax error means
+    // the caller wrote statements, which run as an async function body so both
+    // `return` and `await` work.
+    let result: unknown
+    try {
+      result = (0, eval)(`(${code}\n)`) as unknown
+    } catch (error: unknown) {
+      if (!(error instanceof SyntaxError)) throw error
+      result = (0, eval)(`(async () => {${code}\n})()`) as unknown
+    }
+    if (typeof result === 'object' && result !== null && typeof (result as { then?: unknown }).then === 'function') {
+      void Promise.resolve(result).then(
+        (settled) => { host[key] = { ok: true, json: serialize(settled, 0) } },
+        (error: unknown) => { host[key] = { ok: false, error: String(error) } },
+      )
+      return { pending: true, key }
+    }
+    return { ok: true, json: serialize(result, 0) }
+  } catch (error: unknown) {
+    return { ok: false, error: error instanceof Error ? `${error.name}: ${error.message}` : String(error) }
+  }
+}
+
+/** Read and clear a settled async evaluation result from the page realm. */
+function pageEvalPoll(key: string): unknown {
+  const host = globalThis as unknown as Record<string, unknown>
+  const stored = host[key]
+  if (stored === undefined) return { pending: true }
+  delete host[key]
+  return stored
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => { setTimeout(resolve, ms) })
+}
+
+/**
+ * Execute model-authored JavaScript in the page's main world.
+ *
+ * The call is treated as committed before injection because a page script that
+ * throws after mutating state cannot be withdrawn.
+ */
+async function dispatchEvalTool(
+  tabId: number,
+  frames: TabFrame[],
+  call: ToolCall,
+  budget: ContentBudget,
+  signal: AbortSignal | undefined,
+  targetStillAllowed?: () => boolean,
+  commitAction?: () => void,
+): Promise<ToolAnswer> {
+  const code = typeof call.args.code === 'string' ? call.args.code : ''
+  if (code.trim() === '') return { ok: false, error: { code: 'bad-args', message: 'code must not be empty.' } }
+  if (code.length > EVAL_MAX_CODE_CHARS) {
+    return { ok: false, error: { code: 'bad-args', message: `code must be at most ${EVAL_MAX_CODE_CHARS} characters.` } }
+  }
+  const frameId = requestedFrame(call.args)
+  if (frameId < 0) return { ok: false, error: { code: 'bad-args', message: 'frame must be a non-negative integer.' } }
+  if (frames.find((candidate) => candidate.frameId === frameId) === undefined) {
+    return unavailable(`Frame ${frameId} does not exist or has navigated. Call browser_snapshot again.`)
+  }
+  if (isCancelled(call, signal)) return cancelled()
+  if (targetStillAllowed?.() === false) return targetChanged()
+  commitAction?.()
+
+  const key = `__dsh_eval_${call.id.replace(/[^a-zA-Z0-9_]/g, '_')}`
+  const target = { tabId, frameIds: [frameId] }
+  let envelope: EvalEnvelope | undefined
+  try {
+    envelope = firstInjectionResult(await chrome.scripting.executeScript({
+      target,
+      world: 'MAIN',
+      args: [code, key],
+      func: pageEvalEntry,
+    }))
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error)
+    return unavailable(`The page could not be scripted: ${detail}`)
+  }
+  if (isCancelled(call, signal)) return cancelled()
+  if (targetStillAllowed?.() === false) return targetChanged()
+
+  // Async results park in the page realm; poll until they settle. executeScript
+  // returns the entry function's immediate value, so this is the only portable
+  // way to collect a promise the page itself awaits.
+  for (let attempt = 0; envelope !== undefined && envelope.pending === true && attempt < EVAL_POLL_ATTEMPTS; attempt += 1) {
+    await sleep(EVAL_POLL_INTERVAL_MS)
+    if (isCancelled(call, signal)) return cancelled()
+    try {
+      envelope = firstInjectionResult(await chrome.scripting.executeScript({
+        target,
+        world: 'MAIN',
+        args: [key],
+        func: pageEvalPoll,
+      }))
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : String(error)
+      return unavailable(`The page evaluation result could not be read: ${detail}`)
+    }
+  }
+  if (envelope === undefined) return unavailable('The page evaluation returned no result.')
+  if (envelope.pending === true) {
+    return {
+      ok: true,
+      result: {
+        text: wrapUntrustedContent(
+          `Still running after ${EVAL_POLL_ATTEMPTS * EVAL_POLL_INTERVAL_MS}ms. The page may already have changed state; call browser_eval again when the value is needed.`,
+          budget.maxChars,
+        ),
+      },
+    }
+  }
+  if (envelope.ok === false) {
+    // The error text comes from page code, so it crosses the same untrusted
+    // boundary as any other page payload.
+    const detail = envelope.error ?? 'unknown error'
+    const hint = /unsafe-eval|EvalError|Content Security Policy/i.test(detail)
+      ? ' This page rejects eval through its Content Security Policy; use browser_fetch or the DOM tools instead.'
+      : ''
+    return {
+      ok: true,
+      result: { text: wrapUntrustedContent(`Evaluation failed: ${detail}${hint}`, budget.maxChars) },
+    }
+  }
+  const prefix = 'Evaluation result:'
+  const remaining = Math.max(0, budget.maxChars - prefix.length - 2)
+  return {
+    ok: true,
+    result: { text: `${prefix}\n${wrapUntrustedContent(envelope.json ?? 'undefined', remaining)}` },
+  }
+}
+
 function validateFrameTarget(call: ToolCall, frames: TabFrame[]): ToolAnswer | undefined {
   if (call.name === 'browser_snapshot') return undefined
   const frameId = requestedFrame(call.args)
@@ -807,6 +1020,10 @@ function validateFrameTarget(call: ToolCall, frames: TabFrame[]): ToolAnswer | u
 }
 
 function validateElementTarget(call: ToolCall, tabId: number, frames: TabFrame[]): ToolAnswer | undefined {
+  // Selector/text addressing re-resolves against the live document, so it does
+  // not inherit an index from an older snapshot; only index addressing is
+  // bound to the document that produced the numbering.
+  if (call.name === 'browser_click' && typeof call.args.index !== 'number') return undefined
   if (call.name !== 'browser_click' && call.name !== 'browser_type') return undefined
   const frameId = requestedFrame(call.args)
   const frame = frames.find((candidate) => candidate.frameId === frameId)

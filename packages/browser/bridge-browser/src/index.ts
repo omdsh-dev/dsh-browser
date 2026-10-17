@@ -81,6 +81,13 @@ export interface Config {
   sessionWorkspacePath?: string
   /** Defer real session creation until the first prompt. Defaults to true. */
   deferSessionCreate?: boolean
+  /**
+   * Register the page-crossing advanced tools (`browser_get_storage`,
+   * `browser_fetch`, `browser_eval`). Defaults to false: they expose page
+   * storage, page-origin requests, and page-main-world code execution, so the
+   * extension still asks for approval on every call even when enabled.
+   */
+  advancedTools?: boolean
 }
 
 export const Config: z<Config> = z.object({
@@ -90,6 +97,7 @@ export const Config: z<Config> = z.object({
   maxInteractiveItems: z.number().step(1).min(1).default(DEFAULT_MAX_INTERACTIVE_ITEMS),
   sessionWorkspacePath: z.string().default(DEFAULT_SESSION_WORKSPACE_PATH),
   deferSessionCreate: z.boolean().default(DEFAULT_DEFER_SESSION_CREATE),
+  advancedTools: z.boolean().default(false),
 })
 
 /** The shape after schemastery applies its defaults to every field. */
@@ -115,6 +123,7 @@ export function resolveConfig(config: Config): ResolvedConfig {
     maxInteractiveItems: config.maxInteractiveItems ?? DEFAULT_MAX_INTERACTIVE_ITEMS,
     sessionWorkspacePath: config.sessionWorkspacePath ?? DEFAULT_SESSION_WORKSPACE_PATH,
     deferSessionCreate: config.deferSessionCreate ?? DEFAULT_DEFER_SESSION_CREATE,
+    advancedTools: config.advancedTools ?? false,
   }
   assertPositiveInteger('toolTimeoutMs', resolved.toolTimeoutMs)
   assertPositiveInteger('snapshotMaxChars', resolved.snapshotMaxChars)
@@ -254,6 +263,7 @@ function mountBridge(
       toolTimeoutMs: resolved.toolTimeoutMs,
       snapshotMaxChars: resolved.snapshotMaxChars,
       maxInteractiveItems: resolved.maxInteractiveItems,
+      advancedTools: resolved.advancedTools,
     })
     return () => { for (const dispose of disposers.values()) dispose() }
   }, 'bridge-browser: browser tools')
@@ -266,7 +276,7 @@ function mountBridge(
       name: 'tool:bridge-browser',
       order: 107,
       text: 'A browser bridge may be connected. To read or operate the user\'s active browser page, call browser_snapshot '
-        + '(text-only; numbered items are the click/type targets), unless the current turn already includes a plugin-provided '
+        + '(text-only; numbered items are the click/type targets, and controls without an index can be clicked by visible text or CSS selector), unless the current turn already includes a plugin-provided '
         + 'followed-page browser_snapshot. Reuse that injected snapshot and its indices directly. Never assume page content you have not snapshotted.',
     }), 'bridge-browser: system prompt section')
   }

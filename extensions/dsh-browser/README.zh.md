@@ -10,11 +10,11 @@ dsh 的**浏览器操作端**：让模型直接读取并操作你在浏览器里
 
 | 能力 | 动作 | 说明 |
 |---|---|---|
-| 读取页面 | `browser_snapshot` | 标题/URL/正文/编号交互清单/表单字段（敏感值掩码）；`delta: true` 只返回变化，省 token |
-| 点击元素 | `browser_click` | 按编号点击（链接/按钮/复选框…），React/Vue 组件兼容 |
+| 读取页面 | `browser_snapshot` | 标题/URL/正文/滚动区域/编号交互清单/表单字段（敏感值掩码）；`delta: true` 只返回变化，省 token |
+| 点击元素 | `browser_click` | 按编号、CSS 选择器或可见文本点击；`role`/`nth` 消歧义。从未进入编号清单的 JS 控件也能点 |
 | 填写表单 | `browser_type` | 输入文本，`replace` 清空重填 |
-| 按键 | `browser_press` | Enter/Tab/Escape/方向键等 |
-| 滚动 | `browser_scroll` | 视口滚动（up/down/top/bottom） |
+| 按键 | `browser_press` | Enter/Tab/Escape/方向键等，`modifiers` 支持 Control/Meta/Shift/Alt 组合 |
+| 滚动 | `browser_scroll` | 视口滚动，或按快照选择器/元素编号操作页面内部滚动容器 |
 | 导航 | `browser_navigate` / `browser_open_tab` / `browser_back` / `browser_forward` / `browser_reload` | 受控标签页内跳转，或新开标签页并跟随 |
 | 列出标签页 | `browser_list_tabs` | 列出可访问标签页的稳定 ID、标题、URL 和活动/受控状态 |
 | 跟随标签页 | `browser_follow_tab` | 将后续浏览器工具绑定到已列出的标签页，而不激活该标签页 |
@@ -23,6 +23,16 @@ dsh 的**浏览器操作端**：让模型直接读取并操作你在浏览器里
 | 等待 | `browser_wait` | 页面加载与渲染稳定检测 |
 | 图片对话 | `session.prompt` / `session.attachment` | 按宿主能力启用图片选择、纯图片发送和持久历史预览 |
 | 引用你划选的内容 | 侧栏输入框 | 你在页面里选中的文字会变成输入框里的引用，随下一条消息一起发送 |
+
+高级能力（默认关闭，需在桥插件配置里启用 `advancedTools: true`）：
+
+| 能力 | 动作 | 说明 |
+|---|---|---|
+| 读取页面存储 | `browser_get_storage` | localStorage/sessionStorage；批量列举会掩码疑似凭据的值，显式指定 key 才返回明文 |
+| 以页面身份请求 | `browser_fetch` | 携带页面 Cookie 的 method/headers/body；同源直接可用，跨源遵守 CORS |
+| 执行页面 JavaScript | `browser_eval` | 主世界执行并返回 JSON；异步结果最多轮询 3 秒；严格 CSP 页面拒绝 eval |
+
+每次高级调用都需要审批，返回值一律包在不可信内容边界内。
 
 ## 架构
 
@@ -128,5 +138,7 @@ Chrome 使用 `sidePanel`，Firefox 使用 `sidebar_action`。两者都申请 `s
 - 可访问的跨源 iframe 会进入快照，并通过稳定的 `(frame, index)` 地址执行操作；受保护或已销毁的 frame 会标记为不可访问，不影响整页快照。
 - 验证码/纯图片按钮无法处理——工具结果会标注"存在无文本可访问名的元素"，提示用户手动完成该步。
 - 令牌无自动轮换。
-- `browser_press` 的合成按键不触发浏览器原生默认行为（Tab 焦点移动、方向键、Enter 激活等），仅用于框架内的键盘事件；依赖原生行为的场景请手动操作。
+- `browser_press` 的合成按键不触发浏览器原生默认行为（Tab 焦点移动、方向键、Enter 激活等），仅用于框架内的键盘事件；依赖原生行为的场景请手动操作。组合键能触发页面自己的处理器，但无法触发浏览器保留快捷键（Ctrl+T、Ctrl+W）和原生编辑默认行为（Ctrl+A、Ctrl+C）。
+- `browser_eval` 受页面 CSP 限制，也无法抢占死循环的页面脚本；这类标签页只能手动关闭。
+- `browser_fetch` 以页面 origin 发请求，跨源调用受页面 CORS 限制，且永不被「信任该 origin」长期覆盖。
 - `browser_wait` 以加载完成 + 固定静默窗口为准，不观察持续 DOM 更新（连续刷新的 SPA 可能被报为稳定）。

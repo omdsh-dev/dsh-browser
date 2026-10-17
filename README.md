@@ -49,11 +49,11 @@ The paired Playwright / extension duration ratio was **1.24** (95% CI **1.16–1
 
 | Capability | Tool | Notes |
 |---|---|---|
-| Read page | `browser_snapshot` | Structured text snapshot: title, URL, main text, numbered controls, and masked form fields; `delta: true` returns only changes |
-| Click element | `browser_click` | Click links, buttons, checkboxes, and other controls by inventory number |
+| Read page | `browser_snapshot` | Structured text snapshot: title, URL, main text, inner scroll regions, numbered controls, and masked form fields; `delta: true` returns only changes |
+| Click element | `browser_click` | Click links, buttons, checkboxes, and other controls by inventory number, CSS selector, or visible text — so JS-only pagination rows that never get a number are still clickable |
 | Fill forms | `browser_type` | React/Vue-compatible input; `replace` clears the field first |
-| Press keys | `browser_press` | Keyboard events such as Enter, Tab, Escape, and arrow keys |
-| Scroll | `browser_scroll` | Viewport scrolling: up, down, top, and bottom |
+| Press keys | `browser_press` | Keyboard events such as Enter, Tab, Escape, and arrow keys; `modifiers` adds Control/Meta/Shift/Alt combinations |
+| Scroll | `browser_scroll` | Viewport scrolling, or an inner scroll container addressed by the selector printed in the snapshot |
 | Navigate | `browser_navigate` / `browser_open_tab` / `browser_back` / `browser_forward` / `browser_reload` | Navigation inside the controlled tab, or open a URL in a new tab and follow it (`active:false` keeps the current tab in front) |
 | List tabs | `browser_list_tabs` | List accessible tabs with stable IDs, titles, URLs, window/index metadata, and active/controlled state |
 | Follow tab | `browser_follow_tab` | Bind later browser tools to a tab returned by `browser_list_tabs` without activating it |
@@ -62,6 +62,18 @@ The paired Playwright / extension duration ratio was **1.24** (95% CI **1.16–1
 | Wait for stability | `browser_wait` | Page-load and render-settle detection |
 | Send images | `session.prompt` / `session.attachment` | Host-capability-gated image drafts, image-only prompts, and durable history previews |
 | Quote a selection | side panel composer | Text you highlight in the page appears in the composer and is sent with your next message as fenced, attributed page content |
+
+### Advanced tools (opt-in, off by default)
+
+Page storage, page-origin requests, and page-main-world JavaScript are not part of the default tool set. Set `advancedTools: true` in the bridge plugin config to register them:
+
+| Capability | Tool | Notes |
+|---|---|---|
+| Read page storage | `browser_get_storage` | `localStorage`/`sessionStorage`; bulk listings mask credential-looking values, naming a key reads it unmasked |
+| Request as the page | `browser_fetch` | Method, headers, and body with the page's cookies; same-origin APIs work directly, cross-origin stays subject to CORS |
+| Run page JavaScript | `browser_eval` | Main-world evaluation with a JSON result; async results are polled up to 3s; strict-CSP pages reject eval |
+
+Every advanced call still asks for approval in the side panel and returns its payload inside the untrusted-content boundary.
 
 ## Repository layout
 
@@ -78,7 +90,7 @@ scripts/install.ps1
 - **Your real browser, not a headless copy**: the model works in the page you already have open, retaining logins, sessions, and cookies.
 - **A text-first page interface**: numbered controls, stable IDs across snapshots, delta updates, and masked sensitive values make pages operable without screenshots; user-attached chat images use dsh's separate multimodal message path.
 - **Pointing instead of describing**: highlight the passage you mean and the side panel quotes it, so "explain this" needs no page tour. The quote is captured only while a panel is open, and nothing is sent until you send the message.
-- **A narrow privacy boundary**: passwords and payment-card values are always rendered as `••••` and never leave the page.
+- **A narrow privacy boundary**: passwords and payment-card values are always rendered as `••••` and never leave the page. Reading page storage, issuing page-origin requests, and running page JavaScript are opt-in (`advancedTools`) and approved per call.
 - **A guarded bridge**: authenticated handshakes protect remote connections, privileged gateway methods reject non-loopback callers, and the extension binds tools to one user-controlled tab.
 
 ## Detailed installation and usage

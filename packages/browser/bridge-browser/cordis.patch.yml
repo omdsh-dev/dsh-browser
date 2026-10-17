@@ -14,6 +14,11 @@
 # Sessions materialize only on the first message (deferSessionCreate defaults
 # to true): opening the side panel without chatting leaves no session behind.
 #
+# Advanced page tools (browser_get_storage, browser_fetch, browser_eval) are
+# off by default because they read page storage, send page-origin requests, and
+# run page-main-world JavaScript. Set DSH_ADVANCED_TOOLS=1 to register them;
+# the extension still asks for approval on every call.
+#
 # Security: the bridge path carries its own token auth and refuses privileged
 # gateway methods (settings/credentials/open-*) for non-loopback remotes. Do
 # not run `dsh web --host 0.0.0.0` on untrusted networks with this layer.
@@ -27,3 +32,4 @@
         toolTimeoutMs: 90000
         snapshotMaxChars: 32000
         maxInteractiveItems: 60
+        advancedTools: !!js process.env.DSH_ADVANCED_TOOLS === '1'
