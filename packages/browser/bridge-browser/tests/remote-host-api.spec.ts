@@ -44,10 +44,16 @@ function harness(options: {
       },
     },
   }
+  const peer = {
+    signal: new AbortController().signal,
+    principal: { kind: 'owner' as const },
+    interactions: 'answer',
+  }
   const connection: HostConnectionLike = {
     createSharedFetchHandler: () => ({ fetch }),
+    createPeer: () => peer,
   }
-  return { api: createRemoteHostApi(gateway, connection), invoke, open, fetch, requestBodies }
+  return { api: createRemoteHostApi(gateway, connection), invoke, open, fetch, requestBodies, peer }
 }
 
 describe('dsh 0.2 Remote Host adapter', () => {
@@ -84,21 +90,48 @@ describe('dsh 0.2 Remote Host adapter', () => {
     })
   })
 
-  it('passes the signal in the fifth argument for DSH Desktop 2.x streams', async () => {
+  it('passes the owner Peer and signal for DSH 0.2.1+ streams', async () => {
     const open = vi.fn(async (_endpoint: string, _payload: unknown, uplink: AsyncIterable<unknown>, peer: unknown, signal: AbortSignal) => {
       expect(typeof uplink[Symbol.asyncIterator]).toBe('function')
-      expect(peer).toBeUndefined()
+      expect(peer).toMatchObject({ principal: { kind: 'owner' }, interactions: 'answer' })
       expect(signal).toBeInstanceOf(AbortSignal)
       return { async *[Symbol.asyncIterator]() { yield { type: 'ready', clientId: 'test', host: {} }; await abortWait(signal) } }
     })
-    const { api } = harness({ open })
+    const { api, peer: expectedPeer } = harness({ open })
     const controller = new AbortController()
     const iterator = api.events(controller.signal)[Symbol.asyncIterator]()
     const pending = iterator.next()
     await vi.waitFor(() => expect(open).toHaveBeenCalled())
     controller.abort()
     await pending.catch(() => undefined)
+    expect(open.mock.calls[0]?.[3]).toBe(expectedPeer)
     expect(open.mock.calls[0]?.[4]).toBeInstanceOf(AbortSignal)
+  })
+
+  it('still mounts when Connection has no createPeer (dsh 0.2.0-rc.x)', async () => {
+    const open = vi.fn(async (_endpoint: string, _payload: unknown, _uplink: unknown, peer: unknown, signal: AbortSignal) => {
+      expect(peer).toMatchObject({ principal: { kind: 'owner' }, interactions: 'answer' })
+      return { async *[Symbol.asyncIterator]() { yield { type: 'ready', clientId: 'legacy', host: {} }; await abortWait(signal) } }
+    })
+    const gateway: TypertGatewayLike = {
+      invoke: vi.fn(async () => ({})),
+      wireStream: {
+        open,
+        failure: (error: unknown) => ({ code: 'internal', message: String(error), details: {} }),
+      },
+    }
+    const connection: HostConnectionLike = {
+      createSharedFetchHandler: () => ({
+        fetch: async () => new Response('not found', { status: 404 }),
+      }),
+    }
+    const api = createRemoteHostApi(gateway, connection)
+    const controller = new AbortController()
+    const iterator = api.events(controller.signal)[Symbol.asyncIterator]()
+    const pending = iterator.next()
+    await vi.waitFor(() => expect(open).toHaveBeenCalled())
+    controller.abort()
+    await pending.catch(() => undefined)
   })
   it('preserves V3 durable streams and orders reconnect baselines before transient frames without advancing the durable cursor', async () => {
     const baseline = {
@@ -269,7 +302,7 @@ describe('dsh 0.2 Remote Host adapter', () => {
     const abort = new AbortController()
     const events = api.events(abort.signal)[Symbol.asyncIterator]()
     const live = events.next()
-    await vi.waitFor(() => { expect(open).toHaveBeenCalledWith('$events', { args: {} }, expect.anything(), undefined, expect.any(AbortSignal)) })
+    await vi.waitFor(() => { expect(open).toHaveBeenCalledWith('$events', { args: {} }, expect.anything(), expect.objectContaining({ principal: { kind: 'owner' }, interactions: 'answer' }), expect.any(AbortSignal)) })
 
     await expect(api.call(call('session.history', {
       sessionId: 'session-1',
@@ -321,7 +354,7 @@ describe('dsh 0.2 Remote Host adapter', () => {
           assistantStream: true,
         },
       },
-    }, expect.anything(), undefined, expect.any(AbortSignal))
+    }, expect.anything(), expect.objectContaining({ principal: { kind: 'owner' }, interactions: 'answer' }), expect.any(AbortSignal))
     abort.abort()
     await events.return?.()
   })
@@ -353,7 +386,7 @@ describe('dsh 0.2 Remote Host adapter', () => {
           assistantStream: true,
         },
       },
-    }, expect.anything(), undefined, expect.any(AbortSignal))
+    }, expect.anything(), expect.objectContaining({ principal: { kind: 'owner' }, interactions: 'answer' }), expect.any(AbortSignal))
   })
 
   it('rejects invalid history pagination before calling the Host', async () => {
@@ -419,7 +452,7 @@ describe('dsh 0.2 Remote Host adapter', () => {
     })
     expect(open).toHaveBeenCalledWith('session/follow', {
       args: { request: { address: { kind: 'session', sessionId: 'session-1' }, assistantStream: true } },
-    }, expect.anything(), undefined, expect.any(AbortSignal))
+    }, expect.anything(), expect.objectContaining({ principal: { kind: 'owner' }, interactions: 'answer' }), expect.any(AbortSignal))
     expect(invoke).toHaveBeenCalledOnce()
     const pageArgs = invoke.mock.calls[0]?.[0]?.args as { request: { throughSeq: number } }
     expect(pageArgs.request.throughSeq).toBe(42)
@@ -577,7 +610,7 @@ describe('dsh 0.2 Remote Host adapter', () => {
       ok: true,
       value: { items: [{ workspaceId: 'w1' }], archivedSessionIds: ['s1'] },
     })
-    expect(open).toHaveBeenCalledWith('workspace/follow', { args: {} }, expect.anything(), undefined, expect.any(AbortSignal))
+    expect(open).toHaveBeenCalledWith('workspace/follow', { args: {} }, expect.anything(), expect.objectContaining({ principal: { kind: 'owner' }, interactions: 'answer' }), expect.any(AbortSignal))
   })
 
   it('bridges user questions through $events/result and unwraps the extension answer', async () => {

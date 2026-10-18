@@ -19,6 +19,11 @@ function stubContext(): Context {
   }
   const connection = {
     createSharedFetchHandler: () => ({ fetch: async () => new Response('not found', { status: 404 }) }),
+    createPeer: () => ({
+      signal: new AbortController().signal,
+      principal: { kind: 'owner' },
+      interactions: 'answer',
+    }),
   }
   return {
     webServer: { port: 0, registerUpgrade: () => () => {}, register: () => () => {} },
