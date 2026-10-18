@@ -68,7 +68,7 @@ Each `respond` carries a globally unique transport id as well as the host intera
 |---|---|
 | `browser_snapshot` | Structured text snapshot (title/URL/main/inventory/forms); `delta: true` returns only changes. |
 | `browser_click` / `browser_type` / `browser_press` | Operate inventory items by stable index. |
-| `browser_scroll` / `browser_navigate` / `browser_open_tab` / `browser_back` / `browser_forward` / `browser_reload` | Page movement. |
+| `browser_scroll` / `browser_navigate` / `browser_open_tab` / `browser_open_window` / `browser_back` / `browser_forward` / `browser_reload` | Page movement. |
 | `browser_get_text` / `browser_wait` | Read regions / settle detection. |
 
 ## Model Experience

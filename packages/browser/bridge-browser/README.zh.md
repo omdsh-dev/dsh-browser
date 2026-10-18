@@ -68,7 +68,7 @@ npx @deepseek-ai/dsh@0.2.0-rc.2 web
 |---|---|
 | `browser_snapshot` | 结构化文本快照（标题/URL/正文/清单/表单）；`delta: true` 只返回变化。 |
 | `browser_click` / `browser_type` / `browser_press` | 按稳定编号操作清单元素。 |
-| `browser_scroll` / `browser_navigate` / `browser_open_tab` / `browser_back` / `browser_forward` / `browser_reload` | 页面移动。 |
+| `browser_scroll` / `browser_navigate` / `browser_open_tab` / `browser_open_window` / `browser_back` / `browser_forward` / `browser_reload` | 页面移动。 |
 | `browser_get_text` / `browser_wait` | 读区域文本 / 稳定检测。 |
 
 ## 模型体验

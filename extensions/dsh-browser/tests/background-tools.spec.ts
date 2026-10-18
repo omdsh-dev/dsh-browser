@@ -108,6 +108,7 @@ describe('isNavigationCandidateTool', () => {
     expect(isNavigationCandidateTool('browser_click')).toBe(true)
     expect(isNavigationCandidateTool('browser_navigate')).toBe(true)
     expect(isNavigationCandidateTool('browser_open_tab')).toBe(true)
+    expect(isNavigationCandidateTool('browser_open_window')).toBe(true)
     expect(isNavigationCandidateTool('browser_snapshot')).toBe(false)
     expect(isNavigationCandidateTool('browser_type')).toBe(false)
   })
@@ -1056,5 +1057,140 @@ describe('dispatchOpenTab', () => {
     expect((answer.result as { text: string }).text).toContain('Call browser_snapshot again')
     expect(remove).not.toHaveBeenCalled()
     expect(sendMessage).not.toHaveBeenCalled()
+  })
+})
+
+describe('dispatchOpenWindow', () => {
+  it('creates a blank window, navigates after arming readiness, rebinds, and snapshots', async () => {
+    const { dispatchOpenWindow } = await import('../src/background/tools.ts')
+    const runtimeListeners = new Set<(message: unknown, sender: chrome.runtime.MessageSender) => void>()
+    const create = vi.fn(async () => ({
+      id: 11,
+      focused: true,
+      tabs: [{ id: 55, windowId: 11, url: '' }],
+    }))
+    const update = vi.fn(async () => ({ id: 55, windowId: 11, url: 'https://docs.example/' }))
+    const remove = vi.fn(async () => undefined)
+    const sendMessage = vi.fn(async () => ({ ok: true, result: { text: 'new page' } }))
+    const getAllFrames = vi.fn(async () => [{
+      frameId: 0, parentFrameId: -1, documentId: 'doc-55', url: 'https://docs.example/',
+    }])
+    vi.stubGlobal('chrome', {
+      windows: { create, remove },
+      tabs: { update, remove: vi.fn(async () => undefined), sendMessage, query: vi.fn(async () => []) },
+      scripting: { executeScript: vi.fn(async () => [{ frameId: 0, result: undefined }]) },
+      webNavigation: { getAllFrames },
+      runtime: {
+        onMessage: {
+          addListener: (listener: (message: unknown, sender: chrome.runtime.MessageSender) => void) => {
+            runtimeListeners.add(listener)
+          },
+          removeListener: (listener: (message: unknown, sender: chrome.runtime.MessageSender) => void) => {
+            runtimeListeners.delete(listener)
+          },
+        },
+      },
+    })
+
+    const bindCreatedTab = vi.fn(() => true)
+    const commitAction = vi.fn()
+    const open = dispatchOpenWindow(
+      { id: 'open-window-1', name: 'browser_open_window', args: { url: 'https://docs.example/' } },
+      'auto',
+      { maxItems: 60, maxChars: 12_000 },
+      async () => 'approved',
+      undefined,
+      bindCreatedTab,
+      () => true,
+      commitAction,
+    )
+    await vi.waitFor(() => { expect(runtimeListeners.size).toBe(1) })
+    expect(create).toHaveBeenCalledWith({ focused: true, type: 'normal' })
+    expect(update).toHaveBeenCalledWith(55, { url: 'https://docs.example/' })
+    for (const listener of runtimeListeners) {
+      listener(
+        { type: 'DSH_CONTENT_READY' },
+        {
+          tab: { id: 55 }, frameId: 0, documentId: 'blank-doc', url: 'about:blank',
+        } as chrome.runtime.MessageSender,
+      )
+    }
+    await Promise.resolve()
+    expect(bindCreatedTab).not.toHaveBeenCalled()
+    for (const listener of runtimeListeners) {
+      listener(
+        { type: 'DSH_CONTENT_READY' },
+        {
+          tab: { id: 55 }, frameId: 0, documentId: 'doc-55', url: 'https://docs.example/',
+        } as chrome.runtime.MessageSender,
+      )
+    }
+    const answer = await open
+    expect(bindCreatedTab).toHaveBeenCalledOnce()
+    expect(commitAction).toHaveBeenCalledOnce()
+    expect(remove).not.toHaveBeenCalled()
+    expect(answer.ok).toBe(true)
+    expect((answer.result as { text: string }).text).toContain('Opened a new window')
+    expect((answer.result as { text: string }).text).toContain('new page')
+  })
+
+  it('opens a background window when focused is false', async () => {
+    const { dispatchOpenWindow } = await import('../src/background/tools.ts')
+    const runtimeListeners = new Set<(message: unknown, sender: chrome.runtime.MessageSender) => void>()
+    const create = vi.fn(async () => ({
+      id: 12,
+      focused: false,
+      tabs: [{ id: 56, windowId: 12, url: '' }],
+    }))
+    const update = vi.fn(async () => ({ id: 56, windowId: 12, url: 'https://docs.example/' }))
+    const remove = vi.fn(async () => undefined)
+    const sendMessage = vi.fn(async () => ({ ok: true, result: { text: 'bg page' } }))
+    const getAllFrames = vi.fn(async () => [{
+      frameId: 0, parentFrameId: -1, documentId: 'doc-56', url: 'https://docs.example/',
+    }])
+    vi.stubGlobal('chrome', {
+      windows: { create, remove },
+      tabs: { update, remove: vi.fn(async () => undefined), sendMessage, query: vi.fn(async () => []) },
+      scripting: { executeScript: vi.fn(async () => [{ frameId: 0, result: undefined }]) },
+      webNavigation: { getAllFrames },
+      runtime: {
+        onMessage: {
+          addListener: (listener: (message: unknown, sender: chrome.runtime.MessageSender) => void) => {
+            runtimeListeners.add(listener)
+          },
+          removeListener: (listener: (message: unknown, sender: chrome.runtime.MessageSender) => void) => {
+            runtimeListeners.delete(listener)
+          },
+        },
+      },
+    })
+
+    const open = dispatchOpenWindow(
+      {
+        id: 'open-window-bg',
+        name: 'browser_open_window',
+        args: { url: 'https://docs.example/', focused: false },
+      },
+      'auto',
+      { maxItems: 60, maxChars: 12_000 },
+      async () => 'approved',
+      undefined,
+      () => true,
+      () => true,
+    )
+    await vi.waitFor(() => { expect(runtimeListeners.size).toBe(1) })
+    expect(create).toHaveBeenCalledWith({ focused: false, type: 'normal' })
+    for (const listener of runtimeListeners) {
+      listener(
+        { type: 'DSH_CONTENT_READY' },
+        {
+          tab: { id: 56 }, frameId: 0, documentId: 'doc-56', url: 'https://docs.example/',
+        } as chrome.runtime.MessageSender,
+      )
+    }
+    const answer = await open
+    expect(answer.ok).toBe(true)
+    expect((answer.result as { text: string }).text).toContain('Opened a new background window')
+    expect((answer.result as { text: string }).text).toContain('bg page')
   })
 })

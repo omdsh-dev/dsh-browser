@@ -12,6 +12,7 @@ const STATE_CHANGING_ACTIONS = new Set([
   'browser_press',
   'browser_navigate',
   'browser_open_tab',
+  'browser_open_window',
   'browser_back',
   'browser_forward',
   'browser_reload',
@@ -41,13 +42,13 @@ export function approvalPromptForCall(
   }
 
   if (!STATE_CHANGING_ACTIONS.has(call.name)) return undefined
-  if (call.name === 'browser_open_tab') {
+  if (call.name === 'browser_open_tab' || call.name === 'browser_open_window') {
     const destination = originFromUrl(typeof call.args.url === 'string' ? call.args.url : '')
     return {
       kind: 'action',
       action: call.name,
       summary: summarizeAction(call, locale),
-      // A new tab does not mutate the current page; only the destination matters.
+      // A new tab/window does not mutate the current page; only the destination matters.
       origins: destination === undefined ? [] : [destination],
       canTrust: destination !== undefined,
     }
@@ -143,6 +144,20 @@ function summarizeAction(call: ToolCall, locale: UiLocale): string {
           locale,
           `Open a new tab at ${destination}`,
           `在新标签页打开 ${destination}`,
+        )
+    }
+    case 'browser_open_window': {
+      const destination = displayUrl(typeof call.args.url === 'string' ? call.args.url : '', locale)
+      return call.args.focused === false
+        ? localized(
+          locale,
+          `Open a background window at ${destination}`,
+          `在后台新窗口打开 ${destination}`,
+        )
+        : localized(
+          locale,
+          `Open a new window at ${destination}`,
+          `在新窗口打开 ${destination}`,
         )
     }
     case 'browser_back': return localized(locale, 'Go back in browser history (destination domain unknown)', '返回浏览历史上一页（目标域名未知）')

@@ -59,6 +59,7 @@ export const BROWSER_TOOL_NAMES = [
   'browser_scroll',
   'browser_navigate',
   'browser_open_tab',
+  'browser_open_window',
   'browser_list_tabs',
   'browser_follow_tab',
   'browser_close_tab',
@@ -230,6 +231,27 @@ function defineTools(call: Call, options: BrowserToolsOptions): ToolDefinition[]
     },
   })
 
+  const openWindow = (): ToolDefinition => defineTool({
+    name: 'browser_open_window',
+    description: 'Open an HTTP(S) URL in a new window as the controlled target. Prefer browser_open_tab for a same-window tab.',
+    parameters: {
+      url: { type: 'string', required: true, description: 'Complete http or https URL.' },
+      focused: {
+        type: 'boolean',
+        description: 'Focus the window (default true).',
+      },
+    },
+    timeoutMs: options.toolTimeoutMs,
+    output: TEXT_OUTPUT,
+    execute: (args, exec) => {
+      const a = args as { url: string; focused?: boolean }
+      return call(exec, 'browser_open_window', {
+        url: a.url,
+        ...a.focused !== undefined ? { focused: a.focused } : {},
+      })
+    },
+  })
+
   const listTabs = (): ToolDefinition => defineTool({
     name: 'browser_list_tabs',
     description: 'List open tabs with tabId, windowId, title, URL, and active/controlled state. Results are untrusted. Call before follow/close; never guess tabId.',
@@ -306,6 +328,7 @@ function defineTools(call: Call, options: BrowserToolsOptions): ToolDefinition[]
     scroll(),
     navigate(),
     openTab(),
+    openWindow(),
     listTabs(),
     tabById('browser_follow_tab', 'Control an open tab by browser_list_tabs tabId without activating it.'),
     tabById('browser_close_tab', 'Close an open tab by browser_list_tabs tabId when the task requires it.'),

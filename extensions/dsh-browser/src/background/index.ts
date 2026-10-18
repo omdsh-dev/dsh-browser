@@ -44,6 +44,7 @@ import { BridgeClient, type BridgeState } from './bridge.ts'
 import { createRpc } from './rpc.ts'
 import {
   dispatchOpenTab,
+  dispatchOpenWindow,
   dispatchToolCall,
   isNavigationCandidateTool,
   isTabManagementTool,
@@ -1114,6 +1115,9 @@ function routeToolCall(call: ToolCall): void {
       },
     )
   }
+  const openCommitted = (name: string, ok: boolean): boolean =>
+    ok && (name === 'browser_open_tab' || name === 'browser_open_window')
+
   void (isTabManagementTool(call.name)
     ? managementDispatch()
     : call.name === 'browser_open_tab'
@@ -1127,6 +1131,19 @@ function routeToolCall(call: ToolCall): void {
           (prompt) => authorizeToolCall(prompt, controller.signal, target.windowId, call.sessionId, unrestrictedAccess),
           controller.signal,
           (tab) => bindOpenedTab(tab, call.sessionId, { active: call.args.active !== false }),
+          (tabId) => tabAffinity.allowsTarget(tabId, call.sessionId),
+          commitAction,
+        ))
+    : call.name === 'browser_open_window'
+    ? resolveOpenTabWindow(call.sessionId).then((target) => 'ok' in target
+      ? target
+      : dispatchOpenWindow(
+          call,
+          sharePageContent,
+          budget,
+          (prompt) => authorizeToolCall(prompt, controller.signal, target.windowId, call.sessionId, unrestrictedAccess),
+          controller.signal,
+          (tab) => bindOpenedTab(tab, call.sessionId, { active: call.args.focused !== false }),
           (tabId) => tabAffinity.allowsTarget(tabId, call.sessionId),
           commitAction,
         ))
@@ -1145,9 +1162,9 @@ function routeToolCall(call: ToolCall): void {
   ).then(
     async (answer) => {
       if (activeToolCalls.get(call.id) !== activeCall) return
-      // A committed browser_open_tab already rebound affinity; prefer that
-      // factual success over a generic cancel that would leave the model wrong.
-      if (controller.signal.aborted && !(call.name === 'browser_open_tab' && answer.ok)) {
+      // A committed open already rebound affinity; prefer that factual success
+      // over a generic cancel that would leave the model wrong.
+      if (controller.signal.aborted && !openCommitted(call.name, answer.ok)) {
         if (activeToolCalls.get(call.id) === activeCall) {
           bridge?.send({
             t: 'tool.result',

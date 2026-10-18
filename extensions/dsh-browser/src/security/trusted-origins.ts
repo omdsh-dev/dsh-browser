@@ -52,7 +52,8 @@ export function actionCoveredByTrustedOrigins(
   if (prompt.kind !== 'action' || prompt.origins.length === 0) return false
   const hasKnownBoundary = prompt.canTrust
     || (prompt.action === 'browser_navigate' && prompt.origins.length > 1)
-    || (prompt.action === 'browser_open_tab' && prompt.origins.length === 1)
+    || ((prompt.action === 'browser_open_tab' || prompt.action === 'browser_open_window')
+      && prompt.origins.length === 1)
   if (!hasKnownBoundary) return false
   return prompt.origins.every((origin) =>
     trustedCollections.some((trusted) => originMatchesTrusted(origin, trusted)))

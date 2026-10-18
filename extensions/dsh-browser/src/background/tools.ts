@@ -63,6 +63,7 @@ const NAVIGATION_CANDIDATE_TOOLS = new Set([
   'browser_forward',
   'browser_reload',
   'browser_open_tab',
+  'browser_open_window',
 ])
 const TAB_NATIVE_TOOLS = new Set([
   'browser_snapshot',
@@ -681,6 +682,9 @@ export async function dispatchToolCall(
   if (call.name === 'browser_open_tab') {
     return unavailable('browser_open_tab must be dispatched through the background open-tab path.')
   }
+  if (call.name === 'browser_open_window') {
+    return unavailable('browser_open_window must be dispatched through the background open-window path.')
+  }
   if (isCancelled(call, signal)) return cancelled()
   const effectiveBudget = budget ?? { maxItems: 60, maxChars: DEFAULT_SNAPSHOT_MAX_CHARS }
   if (isTabManagementTool(call.name)) {
@@ -852,6 +856,14 @@ async function removeCreatedTab(tabId: number): Promise<void> {
   }
 }
 
+async function removeCreatedWindow(windowId: number): Promise<void> {
+  try {
+    await chrome.windows.remove(windowId)
+  } catch {
+    // The window may already have been closed by the user or another tool.
+  }
+}
+
 /**
  * Open a URL in a new tab, then optionally snapshot it once the document is ready.
  * Affinity rebinding is owned by the caller via `bindCreatedTab`.
@@ -944,6 +956,131 @@ export async function dispatchOpenTab(
   const status = active
     ? `Opened a new tab at ${parsed.href}.`
     : `Opened a new background tab at ${parsed.href}.`
+  if (!ready || sharePageContent === 'off' || isCancelled(call, signal)) {
+    return {
+      ok: true,
+      result: {
+        text: sharePageContent === 'off'
+          ? `${status} Page content sharing is disabled, so no snapshot was captured.`
+          : `${status} Call browser_snapshot again after the page loads.`,
+      },
+    }
+  }
+
+  try {
+    const snapshot = await snapshotAfterNavigation(
+      tabId,
+      call,
+      status,
+      budget ?? { maxItems: 60, maxChars: DEFAULT_SNAPSHOT_MAX_CHARS },
+      () => targetStillAllowed(tabId),
+    )
+    if (snapshot !== undefined) return snapshot
+  } catch {
+    // Keep the successful open when the replacement page is not yet readable.
+  }
+  return {
+    ok: true,
+    result: { text: `${status} Call browser_snapshot again after the page loads.` },
+  }
+}
+
+/**
+ * Open a URL in a new browser window, then optionally snapshot it once ready.
+ * Affinity rebinding is owned by the caller via `bindCreatedTab`.
+ *
+ * Creates a blank window first, arms the readiness listener, then navigates so
+ * a fast `document_idle` cannot announce readiness before the listener exists.
+ * Cancellation before affinity bind rolls the orphan window back; after bind
+ * the open is treated as committed.
+ */
+export async function dispatchOpenWindow(
+  call: ToolCall,
+  sharePageContent: 'ask' | 'auto' | 'off',
+  budget: ContentBudget | undefined,
+  authorize: ((prompt: ApprovalPrompt) => Promise<ApprovalAuthorization>) | undefined,
+  signal: AbortSignal | undefined,
+  bindCreatedTab: (tab: chrome.tabs.Tab) => boolean,
+  targetStillAllowed: (tabId: number) => boolean,
+  commitAction?: () => void,
+): Promise<ToolAnswer> {
+  if (isCancelled(call, signal)) return cancelled()
+  const parsed = parseHttpUrl(call.args.url)
+  if (parsed === undefined) {
+    return { ok: false, error: { code: 'action-failed', message: 'url must be a complete http or https URL.' } }
+  }
+  const focused = call.args.focused !== false
+
+  const approval = approvalPromptForCall(call, sharePageContent, [])
+  if (approval !== undefined) {
+    const authorization = authorize === undefined ? 'unavailable' : await authorize(approval)
+    if (isCancelled(call, signal)) return cancelled()
+    if (authorization !== 'approved') return approvalFailure(approval, authorization)
+  }
+
+  let createdWindow: chrome.windows.Window
+  try {
+    createdWindow = await chrome.windows.create({ focused, type: 'normal' })
+  } catch (error: unknown) {
+    return {
+      ok: false,
+      error: {
+        code: 'action-failed',
+        message: error instanceof Error ? error.message : 'Failed to open a new browser window.',
+      },
+    }
+  }
+  if (createdWindow.id === undefined) {
+    return { ok: false, error: { code: 'action-failed', message: 'Chrome created a window without an id.' } }
+  }
+  const windowId = createdWindow.id
+  const initialTab = createdWindow.tabs?.[0]
+  if (initialTab === undefined || initialTab.id === undefined) {
+    await removeCreatedWindow(windowId)
+    return { ok: false, error: { code: 'action-failed', message: 'Chrome created a window without a tab.' } }
+  }
+  let created: chrome.tabs.Tab = initialTab
+  const tabId = initialTab.id
+  if (isCancelled(call, signal)) {
+    await removeCreatedWindow(windowId)
+    return cancelled()
+  }
+
+  const navigationWait = waitForNextDocumentReady(tabId, 0, undefined, signal)
+  try {
+    created = await chrome.tabs.update(tabId, { url: parsed.href })
+  } catch (error: unknown) {
+    navigationWait.cancel()
+    await removeCreatedWindow(windowId)
+    return {
+      ok: false,
+      error: {
+        code: 'action-failed',
+        message: error instanceof Error ? error.message : 'Failed to navigate the new browser window.',
+      },
+    }
+  }
+
+  const ready = await navigationWait.ready
+  if (isCancelled(call, signal)) {
+    await removeCreatedWindow(windowId)
+    return cancelled()
+  }
+  commitAction?.()
+  if (!bindCreatedTab(created.id === undefined ? { ...created, id: tabId } : created)) {
+    await removeCreatedWindow(windowId)
+    return {
+      ok: false,
+      error: { code: 'action-failed', message: 'The new window could not become the controlled browser target.' },
+    }
+  }
+
+  resetTabSnapshot(tabId)
+  if (!targetStillAllowed(tabId)) return targetChanged()
+
+  const status = focused
+    ? `Opened a new window at ${parsed.href}.`
+    : `Opened a new background window at ${parsed.href}.`
   if (!ready || sharePageContent === 'off' || isCancelled(call, signal)) {
     return {
       ok: true,

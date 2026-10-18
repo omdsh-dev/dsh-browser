@@ -15,7 +15,7 @@ The **browser-operation end** of dsh: the model reads and operates the browser p
 | Fill forms | `browser_type` | Type text; `replace` clears first |
 | Keys | `browser_press` | Enter/Tab/Escape/arrows etc. |
 | Scroll | `browser_scroll` | Viewport scrolling (up/down/top/bottom) |
-| Navigate | `browser_navigate` / `browser_open_tab` / `browser_back` / `browser_forward` / `browser_reload` | Navigation inside the controlled tab, or open a URL in a new tab and follow it |
+| Navigate | `browser_navigate` / `browser_open_tab` / `browser_open_window` / `browser_back` / `browser_forward` / `browser_reload` | Navigation inside the controlled tab, open a URL in a new tab, or open a new browser window |
 | List tabs | `browser_list_tabs` | List accessible tabs with stable IDs, titles, URLs, and active/controlled state |
 | Follow tab | `browser_follow_tab` | Bind later browser tools to a listed tab without activating it |
 | Close tab | `browser_close_tab` | Close a listed tab |

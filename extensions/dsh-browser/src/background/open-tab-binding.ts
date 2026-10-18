@@ -1,5 +1,5 @@
 /**
- * Affinity binding for tabs created by `browser_open_tab`.
+ * Affinity binding for tabs created by `browser_open_tab` / `browser_open_window`.
  *
  * Foreground opens (`active !== false`) follow the new tab; background opens
  * keep the visible tab and rebind only the controlled target so later tools
