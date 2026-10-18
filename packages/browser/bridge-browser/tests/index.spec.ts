@@ -58,8 +58,12 @@ describe('config', () => {
       ...VALID,
       sessionWorkspacePath: dshHomePath('browser-sessions'),
       deferSessionCreate: true,
+      advancedTools: false,
+      maxForms: 30,
     })
     expect(new Config().sessionWorkspacePath).toBe(dshHomePath('browser-sessions'))
+    expect(new Config().advancedTools).toBe(false)
+    expect(new Config().maxForms).toBe(30)
   })
 
   it('preserves explicit values and the empty-string workspace opt-out', () => {
@@ -68,15 +72,19 @@ describe('config', () => {
       toolTimeoutMs: 1,
       snapshotMaxChars: 500,
       maxInteractiveItems: 3,
+      maxForms: 800,
       sessionWorkspacePath: '',
       deferSessionCreate: false,
+      advancedTools: true,
     })).toEqual({
       token: 'fixed',
       toolTimeoutMs: 1,
       snapshotMaxChars: 500,
       maxInteractiveItems: 3,
+      maxForms: 800,
       sessionWorkspacePath: '',
       deferSessionCreate: false,
+      advancedTools: true,
     })
     expect(new Config({ sessionWorkspacePath: '' }).sessionWorkspacePath).toBe('')
   })
@@ -117,5 +125,6 @@ describe('apply', () => {
     await expect(apply(stubContext(), { ...VALID, toolTimeoutMs: 0 })).rejects.toThrow(/toolTimeoutMs/)
     await expect(apply(stubContext(), { ...VALID, snapshotMaxChars: -1 })).rejects.toThrow(/snapshotMaxChars/)
     await expect(apply(stubContext(), { ...VALID, snapshotMaxChars: 499 })).rejects.toThrow(/at least 500/)
+    await expect(apply(stubContext(), { ...VALID, maxForms: 0 })).rejects.toThrow(/maxForms/)
   })
 })

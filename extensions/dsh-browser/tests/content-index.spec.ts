@@ -83,3 +83,32 @@ describe('selection watch arming', () => {
     }, { timeout: 2_000 })
   })
 })
+
+describe('negotiated snapshot budget', () => {
+  it('applies a maxForms cap forwarded by the background to the next snapshot', async () => {
+    const addListener = vi.fn()
+    vi.stubGlobal('chrome', {
+      runtime: { onMessage: { addListener, removeListener: vi.fn() }, sendMessage: vi.fn(async () => undefined) },
+    })
+    document.body.innerHTML = `<form>${Array.from({ length: 40 }, (_, index) => `<input name="f${index}" value="value-${index}">`).join('')}</form>`
+    await import('../src/content/index.ts')
+
+    const listener = addListener.mock.calls[0]?.[0] as (
+      message: unknown,
+      sender: unknown,
+      respond: (answer: unknown) => void,
+    ) => void
+    const ack = vi.fn()
+    listener({ type: 'DSH_BUDGET', budget: { maxItems: 600, maxForms: 800, maxChars: 400_000 } }, {}, ack)
+    expect(ack).toHaveBeenCalledWith({ ok: true, result: { text: expect.stringContaining('maxForms') } })
+
+    const answer = vi.fn()
+    listener({ type: 'DSH_ACTION', action: 'browser_snapshot', args: {} }, {}, answer)
+    await vi.waitFor(() => { expect(answer).toHaveBeenCalled() }, { timeout: 2_000 })
+
+    const text = (answer.mock.calls[0]?.[0] as { result: { text: string } }).result.text
+    // The 40th field only appears when the negotiated form cap replaced the
+    // content script's built-in default of 30.
+    expect(text).toContain('value-39')
+  })
+})

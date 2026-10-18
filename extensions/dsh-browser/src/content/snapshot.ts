@@ -10,12 +10,22 @@
  * @module
  */
 
-import { accessibleName, collectInteractive, isInViewport, isVisible, mainText, pageText, truncate } from './extract.ts'
+import {
+  accessibleName,
+  collectInteractive,
+  collectScrollableRegions,
+  isInViewport,
+  isVisible,
+  mainText,
+  pageText,
+  truncate,
+  type ScrollableRegionView,
+} from './extract.ts'
 import { ElementIds } from './ids.ts'
 import { isSensitiveField, maskValue } from './privacy.ts'
 
 /** Role label per element kind (model-facing vocabulary). */
-function roleOf(el: Element): string {
+export function roleOf(el: Element): string {
   const role = el.getAttribute('role')
   if (role !== null && role !== '') return role
   if (el instanceof HTMLAnchorElement) return 'link'
@@ -63,12 +73,16 @@ export interface SnapshotView {
   title: string
   ready: 'complete' | 'loading'
   main: string
+  /** Inner scroll containers, with selectors usable by browser_scroll. */
+  regions: ScrollableRegionView[]
   items: InventoryItem[]
   forms: FormFieldView[]
   /** ids that changed since the last snapshot (delta mode). */
   changed: number[]
   /** ids that disappeared since the last snapshot (delta mode). */
   removed: number[]
+  /** true when the inner-scroll region list changed since the last snapshot. */
+  regionsChanged: boolean
   /** true when the inventory was renumbered (model should re-read ids). */
   reindexed: boolean
   /** Budget accounting: characters cut from main text and items/forms dropped by count caps. */
@@ -262,6 +276,12 @@ export function buildSnapshot(ids: ElementIds, options: SnapshotOptions, last: S
   const mainBudget = Math.floor(options.budget.maxChars * 0.5)
   const main = truncate(mainSource, mainBudget)
 
+  // Inner scroll containers are computed after the inventory so both phases
+  // share one layout pass; app shells hide the real document here.
+  const regions = collectScrollableRegions(document)
+  const regionsChanged = last === null
+    || regionSignature(last.regions) !== regionSignature(regions)
+
   const lastItems = last === null ? new Map<number, InventoryItem>() : new Map(last.items.map((item) => [item.index, item]))
   const lastForms = last === null ? new Map<number, FormFieldView>() : new Map(last.forms.map((form) => [form.index, form]))
 
@@ -291,10 +311,12 @@ export function buildSnapshot(ids: ElementIds, options: SnapshotOptions, last: S
     title: document.title,
     ready: document.readyState === 'complete' ? 'complete' : 'loading',
     main: main.text,
+    regions,
     items,
     forms,
     changed: options.delta === true ? [...changed] : [],
     removed: options.delta === true ? removedIds : [],
+    regionsChanged,
     reindexed,
     truncated: {
       mainChars: main.truncated,
@@ -309,8 +331,26 @@ function selectedText(select: HTMLSelectElement): string {
   return [...select.selectedOptions].map((option) => option.textContent ?? '').join(', ')
 }
 
-function sameItem(a: InventoryItem, b: InventoryItem): boolean {
-  return a.role === b.role && a.name === b.name && a.href === b.href
+/** Compact signature used to detect scroll-region membership or position changes. */
+function regionSignature(regions: ScrollableRegionView[]): string {
+  return regions.map((region) => `${region.selector}|${region.percent}|${region.remaining}`).join('\n')
+}
+
+/** Render the inner-scroll section, or nothing when the page has no inner scrollers. */
+function renderScrollRegions(regions: ScrollableRegionView[]): string[] {
+  if (regions.length === 0) return []
+  const lines = ['', 'Scrollable regions (pass selector to browser_scroll to move one):']
+  for (const region of regions) {
+    const axis = region.horizontal ? 'right' : 'down'
+    const position = region.remaining <= 1
+      ? `at the end (${region.percent}%)`
+      : `${region.percent}% ${axis}, ${region.remaining}px remaining`
+    lines.push(`  - ${region.label}: ${position} → selector: ${region.selector}`)
+  }
+  return lines
+}
+
+function sameItem(a: InventoryItem, b: InventoryItem): boolean {  return a.role === b.role && a.name === b.name && a.href === b.href
     && a.disabled === b.disabled && a.checked === b.checked && a.inViewport === b.inViewport
 }
 
@@ -378,6 +418,10 @@ export function renderSnapshot(view: SnapshotView, delta: boolean, maxChars: num
         lines.push(view.main)
       }
     }
+    if (view.regionsChanged) {
+      if (view.regions.length > 0) lines.push(...renderScrollRegions(view.regions))
+      else lines.push('', 'Scrollable regions: none (previously reported regions are gone).')
+    }
     if (changedItems.length > 0) {
       lines.push('')
       lines.push('Changed interactive elements:')
@@ -390,7 +434,7 @@ export function renderSnapshot(view: SnapshotView, delta: boolean, maxChars: num
       for (const form of changedForms) lines.push(renderForm(form, !renderedItems.has(form.index)))
     }
     if (view.removed.length > 0) lines.push(`Removed elements: ${view.removed.join(', ')}`)
-    if (view.changed.length === 0 && view.removed.length === 0) lines.push('(No visible changes.)')
+    if (view.changed.length === 0 && view.removed.length === 0 && !view.regionsChanged) lines.push('(No visible changes.)')
     appendTruncationNotes(lines, view)
     return capRendered(lines.join('\n'), maxChars)
   }
@@ -402,6 +446,7 @@ export function renderSnapshot(view: SnapshotView, delta: boolean, maxChars: num
     lines.push('Main content:')
     lines.push(view.main)
   }
+  lines.push(...renderScrollRegions(view.regions))
   if (view.items.length > 0) {
     lines.push('')
     lines.push('Interactive elements:')

@@ -32,6 +32,7 @@ import { registerBrowserTools } from './tools.ts'
 import {
   BRIDGE_CONFIG_PATH,
   BRIDGE_PATH,
+  DEFAULT_MAX_FORMS,
   DEFAULT_SNAPSHOT_MAX_CHARS,
   MIN_SNAPSHOT_MAX_CHARS,
 } from './protocol.ts'
@@ -75,12 +76,21 @@ export interface Config {
   toolTimeoutMs?: number
   /** Upper bound on one snapshot's rendered characters. Defaults to 32000; minimum 500. */
   snapshotMaxChars?: number
-  /** Upper bound on interactive inventory items per snapshot. Defaults to 60. */
+  /** Upper bound on the interactive inventory per snapshot. Defaults to 60. */
   maxInteractiveItems?: number
+  /** Upper bound on rendered form fields per snapshot. Defaults to 30. */
+  maxForms?: number
   /** Dedicated workspace path for extension-created sessions. Empty disables grouping. */
   sessionWorkspacePath?: string
   /** Defer real session creation until the first prompt. Defaults to true. */
   deferSessionCreate?: boolean
+  /**
+   * Register the page-crossing advanced tools (`browser_get_storage`,
+   * `browser_fetch`, `browser_eval`). Defaults to false: they expose page
+   * storage, page-origin requests, and page-main-world code execution, so the
+   * extension still asks for approval on every call even when enabled.
+   */
+  advancedTools?: boolean
 }
 
 export const Config: z<Config> = z.object({
@@ -88,8 +98,10 @@ export const Config: z<Config> = z.object({
   toolTimeoutMs: z.number().step(1).min(1).default(DEFAULT_TOOL_TIMEOUT_MS),
   snapshotMaxChars: z.number().step(1).min(MIN_SNAPSHOT_MAX_CHARS).default(DEFAULT_SNAPSHOT_MAX_CHARS),
   maxInteractiveItems: z.number().step(1).min(1).default(DEFAULT_MAX_INTERACTIVE_ITEMS),
+  maxForms: z.number().step(1).min(1).default(DEFAULT_MAX_FORMS),
   sessionWorkspacePath: z.string().default(DEFAULT_SESSION_WORKSPACE_PATH),
   deferSessionCreate: z.boolean().default(DEFAULT_DEFER_SESSION_CREATE),
+  advancedTools: z.boolean().default(false),
 })
 
 /** The shape after schemastery applies its defaults to every field. */
@@ -113,8 +125,10 @@ export function resolveConfig(config: Config): ResolvedConfig {
     toolTimeoutMs: config.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS,
     snapshotMaxChars: config.snapshotMaxChars ?? DEFAULT_SNAPSHOT_MAX_CHARS,
     maxInteractiveItems: config.maxInteractiveItems ?? DEFAULT_MAX_INTERACTIVE_ITEMS,
+    maxForms: config.maxForms ?? DEFAULT_MAX_FORMS,
     sessionWorkspacePath: config.sessionWorkspacePath ?? DEFAULT_SESSION_WORKSPACE_PATH,
     deferSessionCreate: config.deferSessionCreate ?? DEFAULT_DEFER_SESSION_CREATE,
+    advancedTools: config.advancedTools ?? false,
   }
   assertPositiveInteger('toolTimeoutMs', resolved.toolTimeoutMs)
   assertPositiveInteger('snapshotMaxChars', resolved.snapshotMaxChars)
@@ -122,6 +136,7 @@ export function resolveConfig(config: Config): ResolvedConfig {
     throw new Error(`bridge-browser: snapshotMaxChars must be at least ${MIN_SNAPSHOT_MAX_CHARS}`)
   }
   assertPositiveInteger('maxInteractiveItems', resolved.maxInteractiveItems)
+  assertPositiveInteger('maxForms', resolved.maxForms)
   return resolved
 }
 
@@ -222,6 +237,7 @@ function mountBridge(
       textOnly: true,
       snapshotMaxChars: resolved.snapshotMaxChars,
       maxInteractiveItems: resolved.maxInteractiveItems,
+      maxForms: resolved.maxForms,
     },
     injectBrowserSnapshot: (sessionId, snapshot) => { browserContext.inject(sessionId, snapshot) },
     purgeSession,
@@ -254,6 +270,7 @@ function mountBridge(
       toolTimeoutMs: resolved.toolTimeoutMs,
       snapshotMaxChars: resolved.snapshotMaxChars,
       maxInteractiveItems: resolved.maxInteractiveItems,
+      advancedTools: resolved.advancedTools,
     })
     return () => { for (const dispose of disposers.values()) dispose() }
   }, 'bridge-browser: browser tools')
@@ -266,7 +283,7 @@ function mountBridge(
       name: 'tool:bridge-browser',
       order: 107,
       text: 'A browser bridge may be connected. To read or operate the user\'s active browser page, call browser_snapshot '
-        + '(text-only; numbered items are the click/type targets), unless the current turn already includes a plugin-provided '
+        + '(text-only; numbered items are the click/type targets, and controls without an index can be clicked by visible text or CSS selector), unless the current turn already includes a plugin-provided '
         + 'followed-page browser_snapshot. Reuse that injected snapshot and its indices directly. Never assume page content you have not snapshotted.',
     }), 'bridge-browser: system prompt section')
   }

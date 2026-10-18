@@ -15,6 +15,21 @@ describe('parseBridgeFrame', () => {
     expect(parseBridgeFrame(JSON.stringify({ t: 'hello', token: 'x' }))).toBeUndefined()
   })
 
+  it('treats the negotiated form cap as optional but validates it when present', () => {
+    const caps = { textOnly: true, snapshotMaxChars: 12_000, maxInteractiveItems: 60 }
+    // Absent keeps adjacent releases compatible: an older extension hello still connects.
+    expect(parseBridgeFrame(JSON.stringify({ t: 'hello', token: 'x', caps }))).toBeDefined()
+    expect(parseBridgeFrame(JSON.stringify({ t: 'hello.ok', caps }))).toBeDefined()
+    // Present must be a positive integer.
+    const withForms = parseBridgeFrame(JSON.stringify({ t: 'hello', token: 'x', caps: { ...caps, maxForms: 800 } }))
+    expect(withForms).toEqual({ t: 'hello', token: 'x', caps: { ...caps, maxForms: 800 } })
+    expect(parseBridgeFrame(JSON.stringify({ t: 'hello.ok', caps: { ...caps, maxForms: 800 } }))).toBeDefined()
+    for (const maxForms of [0, -1, 1.5, '800', null]) {
+      expect(parseBridgeFrame(JSON.stringify({ t: 'hello', token: 'x', caps: { ...caps, maxForms } }))).toBeUndefined()
+      expect(parseBridgeFrame(JSON.stringify({ t: 'hello.ok', caps: { ...caps, maxForms } }))).toBeUndefined()
+    }
+  })
+
   it('parses rpc and tool frames', () => {
     expect(parseBridgeFrame(JSON.stringify({ t: 'rpc', id: '1', method: 'session.list', payload: {} })))
       .toEqual({ t: 'rpc', id: '1', method: 'session.list', payload: {} })

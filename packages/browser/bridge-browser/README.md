@@ -66,13 +66,27 @@ Each `respond` carries a globally unique transport id as well as the host intera
 
 | Tool | Purpose |
 |---|---|
-| `browser_snapshot` | Structured text snapshot (title/URL/main/inventory/forms); `delta: true` returns only changes. |
-| `browser_click` / `browser_type` / `browser_press` | Operate inventory items by stable index. |
-| `browser_scroll` / `browser_navigate` / `browser_open_tab` / `browser_back` / `browser_forward` / `browser_reload` | Page movement. |
+| `browser_snapshot` | Structured text snapshot (title/URL/main/scroll regions/inventory/forms); `delta: true` returns only changes. |
+| `browser_click` | Operate inventory items by stable index, or reach controls that never get an index by CSS selector / visible text (`text`, `selector`, `role`, `nth`). |
+| `browser_type` / `browser_press` | Fill fields by index; send keys with optional `modifiers` such as Control+Enter. |
+| `browser_scroll` / `browser_navigate` / `browser_open_tab` / `browser_back` / `browser_forward` / `browser_reload` | Page movement, including inner scroll containers addressed by the selector printed in the snapshot. |
 | `browser_get_text` / `browser_wait` | Read regions / settle detection. |
+
+### Advanced tools (opt-in)
+
+Three page-crossing tools exist but are **not registered by default**. Enable them with `advancedTools: true` in the plugin config:
+
+| Tool | Purpose | Boundary |
+|---|---|---|
+| `browser_get_storage` | Read `localStorage`/`sessionStorage`. Bulk listings mask credential-looking values; naming a key explicitly reads it unmasked. | Approval-gated as a page read; blocked when page content sharing is `off`. |
+| `browser_fetch` | Send an HTTP request from the page origin with the page's cookies (same-origin API calls just work; cross-origin stays subject to CORS). | Every call needs an explicit action approval; never covered by persistent origin trust. |
+| `browser_eval` | Evaluate JavaScript in the page's main world and return the JSON result. Async results are polled for up to 3s. | Every call needs an explicit action approval; page CSP may reject eval. |
+
+All three return values inside the untrusted-content boundary. They widen the page boundary from "read a snapshot" to "read any page state and issue requests as the page", so the extension keeps asking for approval on every call (a session-wide trust decision still applies).
 
 ## Model Experience
 
+- **Snapshot budgets**: three caps are negotiated with the extension and set in plugin config — `snapshotMaxChars` (default 32000), `maxInteractiveItems` (default 60), and `maxForms` (default 30). Raise them for dense pages; every field the page shows then costs snapshot characters and model tokens.
 - **Token effect**: one `browser_snapshot` (default 32k chars) costs roughly 8–10k tokens for typical English text; the exact count depends on language and tokenizer, and delta snapshots cost a fraction of that. The system-prompt section tells the model to snapshot on demand rather than hoard page text.
 - **KV-cache effect**: none beyond ordinary tool results; snapshots are not cached server-side.
 - **Latency**: each action awaits the extension's real-page execution plus settle detection (typically 0.2–2s; navigation up to 5s).
@@ -87,6 +101,9 @@ Each `respond` carries a globally unique transport id as well as the host intera
 
 - One active extension connection (a second window replaces the first).
 - Accessible cross-origin iframes are snapshotted and operated with stable `(frame, index)` addresses. Restricted or short-lived frames are reported as unavailable without failing the whole page snapshot.
+- Selector/text clicks and key presses dispatch synthetic (untrusted) DOM events: page handlers fire, but browser-reserved shortcuts and native editing defaults (Ctrl+T, Ctrl+W, Ctrl+A, Ctrl+C) are not simulated. Native-level shortcuts would require a CDP/debugger path.
+- `browser_eval` runs in the page's main world, so page CSP may reject `eval`; a page script that loops forever blocks the tab until it is closed, because no sandbox timeout can preempt it.
+- `browser_fetch` issues requests from the page origin: same-origin calls carry the page's cookies, cross-origin calls obey the page's CORS policy. It is never covered by persistent origin trust.
 - Token rotation is manual (edit `~/.dsh/ext-bridge-token` or set `token` in config); no expiry.
 - The Playwright-driven extension e2e self-skips without a usable Chromium executable or a built extension bundle.
 - Approval is enforced in the extension service worker rather than delegated to model behavior. A future dsh tool-pipeline integration may surface the same policy in other clients.

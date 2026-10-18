@@ -93,6 +93,69 @@ describe('approvalPromptForCall', () => {
     expect(approvalPromptForCall(call('browser_wait'), 'auto', FRAMES, 'zh')).toBeUndefined()
   })
 
+  it('asks before reading page storage and never offers persistent trust', () => {
+    expect(approvalPromptForCall(call('browser_get_storage', {}), 'ask', FRAMES, 'zh')).toMatchObject({
+      kind: 'read',
+      origins: ['https://app.example'],
+      canTrust: false,
+      summary: '读取当前页面的 localStorage',
+    })
+    expect(approvalPromptForCall(call('browser_get_storage', { key: 'access_token' }), 'ask', FRAMES, 'en')?.summary)
+      .toContain('localStorage key "access_token"')
+    expect(approvalPromptForCall(call('browser_get_storage', {}), 'auto', FRAMES, 'zh')).toBeUndefined()
+  })
+
+  it('never offers persistent trust for code execution', () => {
+    const prompt = approvalPromptForCall(call('browser_eval', { code: 'document.cookie' }), 'auto', FRAMES, 'zh')
+
+    expect(prompt).toMatchObject({
+      kind: 'action',
+      origins: ['https://app.example'],
+      canTrust: false,
+    })
+    expect(prompt?.summary).toContain('JavaScript')
+    expect(prompt?.summary).toContain('document.cookie')
+    expect(prompt?.summary).not.toContain('\n')
+  })
+
+  it('names both origins for a page-origin request and redacts the query string', () => {
+    const prompt = approvalPromptForCall(call('browser_fetch', {
+      url: 'https://api.example.com/lines?token=secret',
+      method: 'POST',
+      body: '{"id":7}',
+    }), 'auto', FRAMES, 'zh')
+
+    expect(prompt).toMatchObject({
+      kind: 'action',
+      origins: ['https://api.example.com', 'https://app.example'],
+      canTrust: false,
+    })
+    expect(prompt?.summary).toContain('POST https://api.example.com/lines')
+    expect(prompt?.summary).toContain('8 字符')
+    expect(prompt?.summary).not.toContain('secret')
+  })
+
+  it('resolves a relative request path against the page before prompting', () => {
+    const prompt = approvalPromptForCall(call('browser_fetch', { url: '/api/lines?page=2' }), 'auto', FRAMES, 'en')
+
+    expect(prompt).toMatchObject({
+      origins: ['https://app.example'],
+      canTrust: false,
+      summary: 'Send GET https://app.example/api/lines from the current page',
+    })
+  })
+
+  it('describes selector/text clicks and modifier combinations', () => {
+    const byText = approvalPromptForCall(call('browser_click', { text: '下一页' }), 'auto', FRAMES, 'zh')
+    expect(byText?.summary).toBe('点击 文本「下一页」')
+
+    const bySelector = approvalPromptForCall(call('browser_click', { selector: '.pager > a:nth-of-type(2)' }), 'auto', FRAMES, 'en')
+    expect(bySelector?.summary).toBe('Click selector ".pager > a:nth-of-type(2)"')
+
+    const combo = approvalPromptForCall(call('browser_press', { key: 'Enter', modifiers: ['ctrl', 'shift'] }), 'auto', FRAMES, 'en')
+    expect(combo?.summary).toBe('Press “ctrl+shift+Enter”')
+  })
+
   it('renders approval summaries in English for non-Chinese browsers', () => {
     expect(approvalPromptForCall(call('browser_type', {
       index: 3,

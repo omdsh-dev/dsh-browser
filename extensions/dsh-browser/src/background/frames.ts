@@ -76,15 +76,23 @@ export function allocateFrameBudgets(frames: TabFrame[], budget: ContentBudget):
   const childIndex = new Map(childFrames.map((frame, index) => [frame.frameId, index]))
   const chars = allocateDimension(budget.maxChars, childFrames.length)
   const items = allocateDimension(budget.maxItems, childFrames.length)
+  // Form fields are only partitioned when the caller negotiated a cap; an
+  // absent value must stay absent so the content script keeps its own default.
+  const forms = budget.maxForms === undefined
+    ? undefined
+    : allocateDimension(budget.maxForms, childFrames.length)
+
+  const frameBudget = (isMain: boolean, index: number): FrameBudget => {
+    const base: FrameBudget = isMain
+      ? { maxChars: chars.main, maxItems: items.main }
+      : { maxChars: chars.children[index]!, maxItems: items.children[index]! }
+    if (forms !== undefined) base.maxForms = isMain ? forms.main : forms.children[index]!
+    return base
+  }
 
   return new Map(frames.map((frame) => [
     frame.frameId,
-    frame === mainFrame
-      ? { maxChars: chars.main, maxItems: items.main }
-      : {
-          maxChars: chars.children[childIndex.get(frame.frameId)!]!,
-          maxItems: items.children[childIndex.get(frame.frameId)!]!,
-        },
+    frameBudget(frame === mainFrame, childIndex.get(frame.frameId) ?? 0),
   ]))
 }
 

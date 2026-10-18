@@ -66,13 +66,27 @@ npx @deepseek-ai/dsh@0.2.0-rc.2 web
 
 | 工具 | 用途 |
 |---|---|
-| `browser_snapshot` | 结构化文本快照（标题/URL/正文/清单/表单）；`delta: true` 只返回变化。 |
-| `browser_click` / `browser_type` / `browser_press` | 按稳定编号操作清单元素。 |
-| `browser_scroll` / `browser_navigate` / `browser_open_tab` / `browser_back` / `browser_forward` / `browser_reload` | 页面移动。 |
+| `browser_snapshot` | 结构化文本快照（标题/URL/正文/滚动区域/清单/表单）；`delta: true` 只返回变化。 |
+| `browser_click` | 按稳定编号操作清单元素；对从未进清单的控件可用 CSS 选择器或可见文本定位（`text`/`selector`/`role`/`nth`）。 |
+| `browser_type` / `browser_press` | 按编号填字段；按键支持 `modifiers` 组合键（如 Control+Enter）。 |
+| `browser_scroll` / `browser_navigate` / `browser_open_tab` / `browser_back` / `browser_forward` / `browser_reload` | 页面移动，包括用快照里给出的选择器操作页面内部滚动容器。 |
 | `browser_get_text` / `browser_wait` | 读区域文本 / 稳定检测。 |
+
+### 高级工具（默认关闭）
+
+有三个跨越页面边界的工具，**默认不注册**。在插件配置里设置 `advancedTools: true` 才会启用：
+
+| 工具 | 用途 | 边界 |
+|---|---|---|
+| `browser_get_storage` | 读 `localStorage`/`sessionStorage`。批量列举会掩码疑似凭据的值；显式指定 key 才返回明文。 | 按页面读取审批；页面内容共享为 `off` 时不可用。 |
+| `browser_fetch` | 以页面 origin 携带页面 Cookie 发送 HTTP 请求（同源 API 直接可用；跨源仍受 CORS 限制）。 | 每次都需显式动作审批；不会被「信任该 origin」长期覆盖。 |
+| `browser_eval` | 在页面主世界执行 JavaScript 并返回 JSON 结果；异步结果最多轮询 3 秒。 | 每次都需显式动作审批；页面 CSP 可能拒绝 eval。 |
+
+三个工具的返回值都包在不可信内容边界内。它们把页面边界从「读快照」扩展到「读任意页面状态并以页面身份发请求」，因此扩展对每次调用都会请求审批（仍可用会话级信任减少打扰）。
 
 ## 模型体验
 
+- **快照预算**：三个上限经 `hello.ok` 与扩展协商，均在插件配置里设置——`snapshotMaxChars`（默认 32000）、`maxInteractiveItems`（默认 60）、`maxForms`（默认 30）。页面字段密集时可调大；页面显示的每个字段都会占用快照字符和模型 token。
 - **Token 影响**：一次 `browser_snapshot`（默认 32k 字符）对常见英文文本约为 8–10k token，具体取决于语言和分词器；delta 快照只需零头。系统提示段落引导模型按需快照而非囤积页面文本。
 - **KV 缓存影响**：无（快照不做服务端缓存）。
 - **延迟**：每次动作等待扩展在真实页面执行 + 稳定检测（通常 0.2–2s；导航最长 5s）。
@@ -87,6 +101,9 @@ npx @deepseek-ai/dsh@0.2.0-rc.2 web
 
 - 仅一个活动扩展连接（第二个窗口顶替第一个）。
 - 可访问的跨源 iframe 会进入快照，并通过稳定的 `(frame, index)` 地址执行操作；受保护或已销毁的 frame 会标记为不可访问，不影响整页快照。
+- 选择器/文本点击和按键派发的是合成（untrusted）DOM 事件：页面自己的处理器会触发，但浏览器保留快捷键与原生编辑默认行为（Ctrl+T、Ctrl+W、Ctrl+A、Ctrl+C）不会生效。要做到原生级快捷键需要走 CDP/debugger 路径。
+- `browser_eval` 在页面主世界执行，页面 CSP 可能拒绝 `eval`；页面脚本死循环会卡住该标签页，沙箱无法抢占。
+- `browser_fetch` 以页面 origin 发请求：同源调用带页面 Cookie，跨源调用遵守页面 CORS 策略；它永远不被「信任该 origin」长期覆盖。
 - token 手动轮换（改 `~/.dsh/ext-bridge-token` 或配置 `token`），无过期。
 - Playwright 驱动的扩展 e2e 会在缺少可用的 Chromium 可执行文件或构建完成的扩展包时自行跳过。
 - 审批由扩展 service worker 强制执行，而不是依赖模型自觉。未来接入 dsh 工具管线时可以把同一策略暴露给其它客户端。
