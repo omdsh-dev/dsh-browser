@@ -14,6 +14,11 @@
 # Sessions materialize only on the first message (deferSessionCreate defaults
 # to true): opening the side panel without chatting leaves no session behind.
 #
+# Snapshot budgets are negotiated with the extension: snapshotMaxChars,
+# maxInteractiveItems, and maxForms are the three caps. Raise them for dense
+# pages (for example maxForms: 800) at the cost of larger snapshots; the
+# values below are the conservative defaults.
+#
 # Advanced page tools (browser_get_storage, browser_fetch, browser_eval) are
 # off by default because they read page storage, send page-origin requests, and
 # run page-main-world JavaScript. Set DSH_ADVANCED_TOOLS=1 to register them;
@@ -32,4 +37,5 @@
         toolTimeoutMs: 90000
         snapshotMaxChars: 32000
         maxInteractiveItems: 60
+        maxForms: 30
         advancedTools: !!js process.env.DSH_ADVANCED_TOOLS === '1'

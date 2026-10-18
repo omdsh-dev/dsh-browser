@@ -43,6 +43,7 @@ import { BRIDGE_CONFIG_PATH, BRIDGE_PATH } from '@yuxianglin/dsh-bridge-browser/
 import { BridgeClient, type BridgeState } from './bridge.ts'
 import { createRpc } from './rpc.ts'
 import {
+  contentBudgetFromCaps,
   dispatchOpenTab,
   dispatchToolCall,
   isNavigationCandidateTool,
@@ -930,9 +931,7 @@ async function refreshFollowedPage(sessionId: string, tabId: number): Promise<vo
   try {
     const target = await resolveToolTab(sessionId)
     if ('ok' in target || target.id !== tabId || controller.signal.aborted) return
-    const budget = caps === null
-      ? undefined
-      : { maxItems: caps.maxInteractiveItems, maxChars: caps.snapshotMaxChars }
+    const budget = caps === null ? undefined : contentBudgetFromCaps(caps)
     const answer = await dispatchToolCall(
       { id: crypto.randomUUID(), name: 'browser_snapshot', args: {} },
       unrestrictedAccess ? 'auto' : settings.sharePageContent,
@@ -1047,7 +1046,7 @@ async function pushBudgetToControlledTab(negotiated: BridgeCaps): Promise<void> 
   try {
     await chrome.tabs.sendMessage(tabId, {
       type: 'DSH_BUDGET',
-      budget: { maxItems: negotiated.maxInteractiveItems, maxChars: negotiated.snapshotMaxChars },
+      budget: contentBudgetFromCaps(negotiated),
     })
   } catch {
     // 页面尚未注入 content script：下一次快照仍用默认预算，可接受。
@@ -1081,9 +1080,7 @@ function routeToolCall(call: ToolCall): void {
     : setTimeout(() => {
         if (!activeCall.committed) controller.abort()
       }, Math.max(0, call.expiresAt - Date.now()))
-  const budget = caps === null
-    ? undefined
-    : { maxItems: caps.maxInteractiveItems, maxChars: caps.snapshotMaxChars }
+  const budget = caps === null ? undefined : contentBudgetFromCaps(caps)
   const sharePageContent = unrestrictedAccess ? 'auto' : settings.sharePageContent
   const managementDispatch = async (): Promise<ToolAnswer> => {
     await affinityReady

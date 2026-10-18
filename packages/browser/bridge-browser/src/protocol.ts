@@ -36,6 +36,9 @@ export const DEFAULT_TOKEN_BYTES = 32
 /** Default rendered-snapshot character budget. */
 export const DEFAULT_SNAPSHOT_MAX_CHARS = 32_000
 
+/** Default cap on form fields rendered per snapshot. */
+export const DEFAULT_MAX_FORMS = 30
+
 /** Smallest snapshot budget that can carry both trust boundaries and page text. */
 export const MIN_SNAPSHOT_MAX_CHARS = 500
 
@@ -68,6 +71,12 @@ export interface BridgeCaps {
   snapshotMaxChars: number
   /** Upper bound on interactive inventory items per snapshot (plugin config). */
   maxInteractiveItems: number
+  /**
+   * Upper bound on form fields per snapshot (plugin config). Optional so a
+   * bridge and an extension from adjacent releases still negotiate: the absent
+   * side keeps the built-in default instead of failing the handshake.
+   */
+  maxForms?: number
 }
 
 /** Frames sent by the extension to the bridge plugin. */
@@ -235,6 +244,8 @@ function isCaps(value: unknown): value is BridgeCaps {
     && Number.isInteger(caps.snapshotMaxChars)
     && caps.snapshotMaxChars >= MIN_SNAPSHOT_MAX_CHARS
     && typeof caps.maxInteractiveItems === 'number' && caps.maxInteractiveItems > 0
+    && (caps.maxForms === undefined
+      || (typeof caps.maxForms === 'number' && Number.isInteger(caps.maxForms) && caps.maxForms > 0))
 }
 
 function isToolError(value: unknown): value is ToolError {

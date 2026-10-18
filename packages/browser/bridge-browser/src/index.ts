@@ -32,6 +32,7 @@ import { registerBrowserTools } from './tools.ts'
 import {
   BRIDGE_CONFIG_PATH,
   BRIDGE_PATH,
+  DEFAULT_MAX_FORMS,
   DEFAULT_SNAPSHOT_MAX_CHARS,
   MIN_SNAPSHOT_MAX_CHARS,
 } from './protocol.ts'
@@ -75,8 +76,10 @@ export interface Config {
   toolTimeoutMs?: number
   /** Upper bound on one snapshot's rendered characters. Defaults to 32000; minimum 500. */
   snapshotMaxChars?: number
-  /** Upper bound on interactive inventory items per snapshot. Defaults to 60. */
+  /** Upper bound on the interactive inventory per snapshot. Defaults to 60. */
   maxInteractiveItems?: number
+  /** Upper bound on rendered form fields per snapshot. Defaults to 30. */
+  maxForms?: number
   /** Dedicated workspace path for extension-created sessions. Empty disables grouping. */
   sessionWorkspacePath?: string
   /** Defer real session creation until the first prompt. Defaults to true. */
@@ -95,6 +98,7 @@ export const Config: z<Config> = z.object({
   toolTimeoutMs: z.number().step(1).min(1).default(DEFAULT_TOOL_TIMEOUT_MS),
   snapshotMaxChars: z.number().step(1).min(MIN_SNAPSHOT_MAX_CHARS).default(DEFAULT_SNAPSHOT_MAX_CHARS),
   maxInteractiveItems: z.number().step(1).min(1).default(DEFAULT_MAX_INTERACTIVE_ITEMS),
+  maxForms: z.number().step(1).min(1).default(DEFAULT_MAX_FORMS),
   sessionWorkspacePath: z.string().default(DEFAULT_SESSION_WORKSPACE_PATH),
   deferSessionCreate: z.boolean().default(DEFAULT_DEFER_SESSION_CREATE),
   advancedTools: z.boolean().default(false),
@@ -121,6 +125,7 @@ export function resolveConfig(config: Config): ResolvedConfig {
     toolTimeoutMs: config.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS,
     snapshotMaxChars: config.snapshotMaxChars ?? DEFAULT_SNAPSHOT_MAX_CHARS,
     maxInteractiveItems: config.maxInteractiveItems ?? DEFAULT_MAX_INTERACTIVE_ITEMS,
+    maxForms: config.maxForms ?? DEFAULT_MAX_FORMS,
     sessionWorkspacePath: config.sessionWorkspacePath ?? DEFAULT_SESSION_WORKSPACE_PATH,
     deferSessionCreate: config.deferSessionCreate ?? DEFAULT_DEFER_SESSION_CREATE,
     advancedTools: config.advancedTools ?? false,
@@ -131,6 +136,7 @@ export function resolveConfig(config: Config): ResolvedConfig {
     throw new Error(`bridge-browser: snapshotMaxChars must be at least ${MIN_SNAPSHOT_MAX_CHARS}`)
   }
   assertPositiveInteger('maxInteractiveItems', resolved.maxInteractiveItems)
+  assertPositiveInteger('maxForms', resolved.maxForms)
   return resolved
 }
 
@@ -231,6 +237,7 @@ function mountBridge(
       textOnly: true,
       snapshotMaxChars: resolved.snapshotMaxChars,
       maxInteractiveItems: resolved.maxInteractiveItems,
+      maxForms: resolved.maxForms,
     },
     injectBrowserSnapshot: (sessionId, snapshot) => { browserContext.inject(sessionId, snapshot) },
     purgeSession,

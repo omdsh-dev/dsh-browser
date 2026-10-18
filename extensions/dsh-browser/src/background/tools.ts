@@ -8,8 +8,8 @@
  * @module
  */
 
-import { DEFAULT_SNAPSHOT_MAX_CHARS } from '@yuxianglin/dsh-bridge-browser/src/protocol.ts'
-import type { ToolError } from '@yuxianglin/dsh-bridge-browser/src/protocol.ts'
+import { DEFAULT_MAX_FORMS, DEFAULT_SNAPSHOT_MAX_CHARS } from '@yuxianglin/dsh-bridge-browser/src/protocol.ts'
+import type { BridgeCaps, ToolError } from '@yuxianglin/dsh-bridge-browser/src/protocol.ts'
 import {
   allocateFrameBudgets,
   frameDocumentKey,
@@ -45,6 +45,28 @@ export interface ToolAnswer {
 export interface ContentBudget {
   maxItems: number
   maxChars: number
+  /**
+   * Form-field cap. Absent when the connected bridge predates the negotiated
+   * field, in which case the content script keeps its own default.
+   */
+  maxForms?: number
+}
+
+/**
+ * Project negotiated capabilities onto a content budget.
+ *
+ * `maxForms` stays optional so an older bridge that never advertised it does
+ * not silently reset the content script's form budget to zero.
+ *
+ * @param caps - capabilities from `hello.ok`.
+ * @returns the per-tab budget to send with page actions.
+ */
+export function contentBudgetFromCaps(caps: BridgeCaps): ContentBudget {
+  return {
+    maxItems: caps.maxInteractiveItems,
+    maxChars: caps.snapshotMaxChars,
+    ...caps.maxForms === undefined ? {} : { maxForms: caps.maxForms },
+  }
 }
 
 const CONTENT_SCRIPT_FILE = 'content.js'
@@ -703,7 +725,7 @@ export async function dispatchToolCall(
     return unavailable('browser_open_tab must be dispatched through the background open-tab path.')
   }
   if (isCancelled(call, signal)) return cancelled()
-  const effectiveBudget = budget ?? { maxItems: 60, maxChars: DEFAULT_SNAPSHOT_MAX_CHARS }
+  const effectiveBudget = budget ?? { maxItems: 60, maxChars: DEFAULT_SNAPSHOT_MAX_CHARS, maxForms: DEFAULT_MAX_FORMS }
   if (isTabManagementTool(call.name)) {
     return dispatchTabManagementTool(call, effectiveBudget, authorize, signal, tabManagement)
   }
@@ -1177,7 +1199,7 @@ export async function dispatchOpenTab(
       tabId,
       call,
       status,
-      budget ?? { maxItems: 60, maxChars: DEFAULT_SNAPSHOT_MAX_CHARS },
+      budget ?? { maxItems: 60, maxChars: DEFAULT_SNAPSHOT_MAX_CHARS, maxForms: DEFAULT_MAX_FORMS },
       () => targetStillAllowed(tabId),
     )
     if (snapshot !== undefined) return snapshot

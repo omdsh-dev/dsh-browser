@@ -86,6 +86,7 @@ All three return values inside the untrusted-content boundary. They widen the pa
 
 ## Model Experience
 
+- **Snapshot budgets**: three caps are negotiated with the extension and set in plugin config — `snapshotMaxChars` (default 32000), `maxInteractiveItems` (default 60), and `maxForms` (default 30). Raise them for dense pages; every field the page shows then costs snapshot characters and model tokens.
 - **Token effect**: one `browser_snapshot` (default 32k chars) costs roughly 8–10k tokens for typical English text; the exact count depends on language and tokenizer, and delta snapshots cost a fraction of that. The system-prompt section tells the model to snapshot on demand rather than hoard page text.
 - **KV-cache effect**: none beyond ordinary tool results; snapshots are not cached server-side.
 - **Latency**: each action awaits the extension's real-page execution plus settle detection (typically 0.2–2s; navigation up to 5s).

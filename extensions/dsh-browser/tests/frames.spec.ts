@@ -24,6 +24,18 @@ describe('allocateFrameBudgets', () => {
     expect(allocated.get(2)).toEqual({ maxItems: 1, maxChars: 10 })
   })
 
+  it('partitions the negotiated form cap only when the caller supplied one', () => {
+    expect(allocateFrameBudgets(frames(1), { maxItems: 60, maxChars: 12_000 }).get(0))
+      .toEqual({ maxItems: 60, maxChars: 12_000 })
+
+    const allocated = allocateFrameBudgets(frames(3), { maxItems: 10, maxChars: 100, maxForms: 10 })
+
+    expect(allocated.get(0)).toEqual({ maxItems: 8, maxChars: 80, maxForms: 8 })
+    expect(allocated.get(1)).toEqual({ maxItems: 1, maxChars: 10, maxForms: 1 })
+    expect(allocated.get(2)).toEqual({ maxItems: 1, maxChars: 10, maxForms: 1 })
+    expect([...allocated.values()].reduce((sum, entry) => sum + (entry.maxForms ?? 0), 0)).toBe(10)
+  })
+
   it('uses zero-item child allocations when the negotiated cap is exhausted', () => {
     const allocated = allocateFrameBudgets(frames(6), { maxItems: 1, maxChars: 3 })
 
