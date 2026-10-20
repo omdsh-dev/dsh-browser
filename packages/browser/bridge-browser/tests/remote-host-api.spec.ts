@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   createRemoteHostApi,
   type HostConnectionLike,
+  type HostPeerLike,
   type TypertGatewayLike,
 } from '../src/remote-host-api.ts'
 import type { HostRpcCall } from '../src/host-api.ts'
@@ -19,6 +20,7 @@ function harness(options: {
   invoke?: TypertGatewayLike['invoke']
   open?: TypertGatewayLike['wireStream']['open']
   fetch?: (request: Request) => Promise<Response>
+  peer?: HostPeerLike
 } = {}) {
   const invoke = vi.fn(options.invoke ?? (async () => ({ accepted: true })))
   const open = vi.fn(options.open ?? (async (_endpoint, _payload, _uplink, _peer, signal) => ({
@@ -44,13 +46,33 @@ function harness(options: {
       },
     },
   }
+  const peer = options.peer
   const connection: HostConnectionLike = {
     createSharedFetchHandler: () => ({ fetch }),
+    ...(peer === undefined ? {} : { createPeer: () => peer }),
   }
   return { api: createRemoteHostApi(gateway, connection), invoke, open, fetch, requestBodies }
 }
 
 describe('dsh 0.2 Remote Host adapter', () => {
+  it('opens wire streams with the in-process owner Peer on dsh 0.2.1', async () => {
+    const peer: HostPeerLike = {
+      signal: new AbortController().signal,
+      interactions: 'answer',
+      principal: { kind: 'owner' },
+    }
+    const { api, open } = harness({ peer })
+    const controller = new AbortController()
+    const iterator = api.events(controller.signal)[Symbol.asyncIterator]()
+    const pending = iterator.next()
+    await new Promise((resolve) => { setTimeout(resolve, 20) })
+    // dsh 0.2.1 aborts with `peer.signal` before opening `$events`; the Peer
+    // must arrive in the fourth slot or the stream never opens.
+    expect(open).toHaveBeenCalledWith('$events', { args: {} }, expect.anything(), peer, expect.anything())
+    controller.abort(new Error('test complete'))
+    await pending.catch(() => undefined)
+  })
+
   it.each([
     { next: { provider: 'session-provider', model: 'saved-model', reasoningEffort: 'high' }, routable: true },
     { next: { provider: 'removed-provider', model: 'saved-model' }, routable: false },

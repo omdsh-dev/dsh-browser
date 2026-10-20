@@ -14,6 +14,12 @@
 # Sessions materialize only on the first message (deferSessionCreate defaults
 # to true): opening the side panel without chatting leaves no session behind.
 #
+# Port discovery: `dsh web --port 0` (how DSH Desktop starts) reassigns the port
+# carrying /ext/bridge on every launch, but the extension can only probe a fixed
+# port list, so a dynamic host looks offline. The bridge therefore republishes
+# /ext/bridge-config on the stable loopback port below. Set it to 0 to disable,
+# or to another port the extension probes (3080 / 3081 / 3090 / 14389 / 19387).
+#
 # Security: the bridge path carries its own token auth and refuses privileged
 # gateway methods (settings/credentials/open-*) for non-loopback remotes. Do
 # not run `dsh web --host 0.0.0.0` on untrusted networks with this layer.
@@ -27,3 +33,4 @@
         toolTimeoutMs: 90000
         snapshotMaxChars: 32000
         maxInteractiveItems: 60
+        discoveryPort: 43189

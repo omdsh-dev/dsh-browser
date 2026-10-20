@@ -18,6 +18,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import type { Server } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-attachment'
@@ -39,6 +40,7 @@ import { withSessionDeferral } from './session-deferral.ts'
 import { withSessionWorkspace } from './session-workspace.ts'
 import { purgeSessionFiles, type SessionPurgeDeps } from './session-purge.ts'
 import { resolveToken } from './token.ts'
+import { DEFAULT_DISCOVERY_PORT, startDiscoveryListener } from './discovery.ts'
 import {
   createRemoteHostApi,
   type HostConnectionLike,
@@ -81,6 +83,13 @@ export interface Config {
   sessionWorkspacePath?: string
   /** Defer real session creation until the first prompt. Defaults to true. */
   deferSessionCreate?: boolean
+  /**
+   * Stable loopback port that republishes `/ext/bridge-config`, so an extension
+   * probing a fixed port list can still find a host whose web port is assigned
+   * dynamically (`dsh web --port 0`, which is how DSH Desktop starts).
+   * Defaults to 43189; `0` disables the listener.
+   */
+  discoveryPort?: number
 }
 
 export const Config: z<Config> = z.object({
@@ -90,6 +99,7 @@ export const Config: z<Config> = z.object({
   maxInteractiveItems: z.number().step(1).min(1).default(DEFAULT_MAX_INTERACTIVE_ITEMS),
   sessionWorkspacePath: z.string().default(DEFAULT_SESSION_WORKSPACE_PATH),
   deferSessionCreate: z.boolean().default(DEFAULT_DEFER_SESSION_CREATE),
+  discoveryPort: z.natural().max(65_535).default(DEFAULT_DISCOVERY_PORT),
 })
 
 /** The shape after schemastery applies its defaults to every field. */
@@ -99,6 +109,13 @@ type ResolvedConfig = Required<Omit<Config, 'token'>> & Pick<Config, 'token'>
 export function assertPositiveInteger(name: string, value: number): void {
   if (!Number.isInteger(value) || value < 1) {
     throw new Error(`bridge-browser: ${name} must be a positive integer`)
+  }
+}
+
+/** An optional port must be a whole number in `0..65535` (`0` disables it). Exported for validation tests. */
+export function assertPortNumber(name: string, value: number): void {
+  if (!Number.isInteger(value) || value < 0 || value > 65_535) {
+    throw new Error(`bridge-browser: ${name} must be an integer between 0 and 65535`)
   }
 }
 
@@ -115,6 +132,7 @@ export function resolveConfig(config: Config): ResolvedConfig {
     maxInteractiveItems: config.maxInteractiveItems ?? DEFAULT_MAX_INTERACTIVE_ITEMS,
     sessionWorkspacePath: config.sessionWorkspacePath ?? DEFAULT_SESSION_WORKSPACE_PATH,
     deferSessionCreate: config.deferSessionCreate ?? DEFAULT_DEFER_SESSION_CREATE,
+    discoveryPort: config.discoveryPort ?? DEFAULT_DISCOVERY_PORT,
   }
   assertPositiveInteger('toolTimeoutMs', resolved.toolTimeoutMs)
   assertPositiveInteger('snapshotMaxChars', resolved.snapshotMaxChars)
@@ -122,6 +140,7 @@ export function resolveConfig(config: Config): ResolvedConfig {
     throw new Error(`bridge-browser: snapshotMaxChars must be at least ${MIN_SNAPSHOT_MAX_CHARS}`)
   }
   assertPositiveInteger('maxInteractiveItems', resolved.maxInteractiveItems)
+  assertPortNumber('discoveryPort', resolved.discoveryPort)
   return resolved
 }
 
@@ -248,6 +267,37 @@ function mountBridge(
     },
   }
   ctx.effect(() => ctx.webServer.register(configRoute), 'bridge-browser: /ext/bridge-config route')
+
+  // Stable discovery port: DSH Desktop boots its web server with `--port 0`, so
+  // the port carrying `/ext/bridge` is reassigned on every launch while the
+  // extension can only probe a fixed list. Republishing the live URL on that
+  // fixed port keeps zero-config discovery working across restarts.
+  const discoveryPort = resolved.discoveryPort
+  if (discoveryPort > 0) {
+    let discoveryServer: Server | undefined
+    let discoveryStopped = false
+    void startDiscoveryListener({
+      port: discoveryPort,
+      webPort: () => ctx.webServer.port,
+      warn: message => { ctx.logger.warn(message) },
+    }).then((listener) => {
+      if (listener === undefined) return
+      if (discoveryStopped) {
+        listener.close()
+        return
+      }
+      discoveryServer = listener
+      ctx.logger.info(
+        `browser bridge: discovery published on http://127.0.0.1:${String(discoveryPort)}${BRIDGE_CONFIG_PATH}`,
+      )
+    }).catch((error: unknown) => {
+      ctx.logger.warn(`bridge-browser: discovery listener failed: ${String(error)}`)
+    })
+    ctx.effect(() => () => {
+      discoveryStopped = true
+      discoveryServer?.close()
+    }, 'bridge-browser: discovery listener')
+  }
 
   ctx.effect(() => {
     const disposers = registerBrowserTools(ctx, server, {

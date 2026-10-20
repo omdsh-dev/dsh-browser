@@ -16,8 +16,13 @@ dsh 的**浏览器操作桥**：在宿主 webserver 上挂载一个 **token 认�
 | `maxInteractiveItems` | `number` | 60 | 单次快照交互清单条数上限。 |
 | `sessionWorkspacePath` | `string` | `~/.dsh/browser-sessions` | 扩展创建的会话所用的专用 Host Workspace。插件会在首次调用未显式指定工作区的 `session.create` 时创建并幂等注册该目录；会话的 cwd 随之变为此路径，因此 GUI 会显示 `browser-sessions` 工作区分组。设为 `""` 可让会话继续显示在“未分组”中。 |
 | `deferSessionCreate` | `boolean` | `true` | 会话只在第一条消息时才真正创建：`session.create` 先返回一个内存暂定 ID（不落库），历史读取为空，第一次 `session.prompt` 才创建真实会话（同一 ID、回放原始创建参数）。只打开面板不说话，会在会话库/GUI 里不留任何痕迹。 |
+| `discoveryPort` | `number` | 43189 | 稳定的回环端口，重新发布 `/ext/bridge-config`，供只探测固定端口表的扩展发现本机。`0` 关闭。 |
 
 工作区分组采用尽力而为方式。如果组合没有 workspace 域、目录创建失败，或 `workspace.create` 拒绝该路径，插件会记录一条警告，并在不注入工作区的情况下发送所有会话创建请求，因此浏览器聊天仍可使用。
+
+### 端口发现
+
+扩展通过在固定端口表（3080、3081、3090、14389、43189）上请求 `/ext/bridge-config` 来发现本机 dsh。这对默认监听 3080 的 `dsh web` 成立；但 DSH Desktop 以内嵌方式启动 Web 服务时用的是 `dsh web --port 0`，每次启动都由系统分配新端口，固定端口表就永远打不中。因此桥接插件额外绑定 `discoveryPort`（仅回环），只在该端口回答这一个路由，返回当前真实的 WebSocket 地址。发布的地址不含 token：WebSocket 仍然只对回环的 `chrome-extension://` 来源免 token，其它来源必须提供 bearer token。端口被占用时——包括 Web 服务本身就占用该端口——监听器直接跳过并记录一条警告，启动流程继续。
 
 ## 使用
 

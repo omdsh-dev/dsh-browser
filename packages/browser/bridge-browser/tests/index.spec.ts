@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
-import { apply, assertPositiveInteger, Config, resolveConfig } from '../src/index.ts'
+import { apply, assertPortNumber, assertPositiveInteger, Config, resolveConfig } from '../src/index.ts'
+import { DEFAULT_DISCOVERY_PORT } from '../src/discovery.ts'
 
 /** Minimal context stub: apply only needs the services at registration time. */
 function stubContext(): Context {
@@ -49,17 +50,29 @@ describe('assertPositiveInteger', () => {
   })
 })
 
+describe('assertPortNumber', () => {
+  it('accepts the optional-port range and rejects anything else', () => {
+    expect(() => assertPortNumber('x', 0)).not.toThrow()
+    expect(() => assertPortNumber('x', 65_535)).not.toThrow()
+    expect(() => assertPortNumber('x', -1)).toThrow(/between 0 and 65535/)
+    expect(() => assertPortNumber('x', 65_536)).toThrow(/between 0 and 65535/)
+    expect(() => assertPortNumber('x', 1.5)).toThrow(/between 0 and 65535/)
+  })
+})
+
 /** Valid budgets (the Loader applies schema defaults; hand-built tests pass them explicitly). */
-const VALID = { toolTimeoutMs: 90_000, snapshotMaxChars: 32_000, maxInteractiveItems: 60 }
+const VALID = { toolTimeoutMs: 90_000, snapshotMaxChars: 32_000, maxInteractiveItems: 60, discoveryPort: 0 }
 
 describe('config', () => {
   it('resolves defaults, including an enabled workspace under the dsh home', () => {
     expect(resolveConfig({})).toEqual({
       ...VALID,
+      discoveryPort: DEFAULT_DISCOVERY_PORT,
       sessionWorkspacePath: dshHomePath('browser-sessions'),
       deferSessionCreate: true,
     })
     expect(new Config().sessionWorkspacePath).toBe(dshHomePath('browser-sessions'))
+    expect(new Config().discoveryPort).toBe(DEFAULT_DISCOVERY_PORT)
   })
 
   it('preserves explicit values and the empty-string workspace opt-out', () => {
@@ -70,6 +83,7 @@ describe('config', () => {
       maxInteractiveItems: 3,
       sessionWorkspacePath: '',
       deferSessionCreate: false,
+      discoveryPort: 43_190,
     })).toEqual({
       token: 'fixed',
       toolTimeoutMs: 1,
@@ -77,6 +91,7 @@ describe('config', () => {
       maxInteractiveItems: 3,
       sessionWorkspacePath: '',
       deferSessionCreate: false,
+      discoveryPort: 43_190,
     })
     expect(new Config({ sessionWorkspacePath: '' }).sessionWorkspacePath).toBe('')
   })

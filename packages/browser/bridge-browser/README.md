@@ -16,8 +16,13 @@ The **browser-operation bridge** for dsh: mounts a token-authenticated WebSocket
 | `maxInteractiveItems` | `number` | 60 | Upper bound on interactive inventory items per snapshot. |
 | `sessionWorkspacePath` | `string` | `~/.dsh/browser-sessions` | Dedicated Host Workspace for extension-created sessions. The plugin creates and idempotently registers the directory on the first implicit `session.create`; the session cwd becomes this path, so the GUI shows a `browser-sessions` workspace group. Set `""` to keep sessions Ungrouped. |
 | `deferSessionCreate` | `boolean` | `true` | Sessions materialize only on the first message: `session.create` answers with a provisional id (nothing persisted), history reads empty, and the first `session.prompt` creates the real session (same id, original payload). Opening the panel without chatting leaves zero trace in the session store/GUI. |
+| `discoveryPort` | `number` | 43189 | Stable loopback port that republishes `/ext/bridge-config` for extensions that only probe fixed ports. `0` disables it. |
 
 Workspace grouping is best-effort. If the composition has no workspace domain, directory creation fails, or `workspace.create` rejects the path, the plugin logs one warning and sends every session creation without an injected workspace so browser chat remains usable.
+
+### Port discovery
+
+The extension finds a local host by fetching `/ext/bridge-config` on a fixed port list (3080, 3081, 3090, 14389, 43189). That works for `dsh web`, which defaults to 3080, but `dsh web --port 0` — how DSH Desktop starts its embedded web server — asks the OS for a free port on every launch. The bridge therefore also binds `discoveryPort` (loopback only) and answers that one route there with the live WebSocket URL. The published URL carries no token; the WebSocket still authenticates loopback `chrome-extension://` clients by origin and requires the bearer token everywhere else. When the port is already taken — including the case where the web server itself runs on it — the listener is skipped with a single warning and boot continues.
 
 ## Usage
 
