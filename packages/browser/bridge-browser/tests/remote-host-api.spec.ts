@@ -19,6 +19,7 @@ function harness(options: {
   invoke?: TypertGatewayLike['invoke']
   open?: TypertGatewayLike['wireStream']['open']
   fetch?: (request: Request) => Promise<Response>
+  createPeer?: HostConnectionLike['createPeer']
 } = {}) {
   const invoke = vi.fn(options.invoke ?? (async () => ({ accepted: true })))
   const open = vi.fn(options.open ?? (async (_endpoint, _payload, _uplink, _peer, signal) => ({
@@ -46,9 +47,99 @@ function harness(options: {
   }
   const connection: HostConnectionLike = {
     createSharedFetchHandler: () => ({ fetch }),
+    ...(options.createPeer === undefined ? {} : { createPeer: options.createPeer }),
   }
   return { api: createRemoteHostApi(gateway, connection), invoke, open, fetch, requestBodies }
 }
+
+describe('dsh 0.2.1 in-process owner Peer', () => {
+  const peer = {
+    id: 'peer-owner',
+    interactions: 'answer',
+    principal: { kind: 'owner' },
+    signal: new AbortController().signal,
+  }
+
+  it('mints one owner Peer for wire streams, invoke, and $events/result', async () => {
+    let releaseCancel: (() => void) | undefined
+    const { api, open, invoke, fetch } = harness({
+      createPeer: () => peer,
+      open: async (endpoint, _payload, _uplink, _peer, signal) => {
+        if (endpoint === 'workspace/follow') {
+          return {
+            async *[Symbol.asyncIterator]() {
+              yield { type: 'baseline', value: { items: [] } }
+              await abortWait(signal)
+            },
+          }
+        }
+        if (endpoint !== '$events') throw new Error(endpoint)
+        return {
+          async *[Symbol.asyncIterator]() {
+            yield { type: 'ready', clientId: 'client-peer', host: { home: '/home/test' } }
+            yield {
+              type: 'waterfall',
+              event: 'user-questions/request',
+              eventId: 'question-peer',
+              agentId: 'session-1',
+              request: { questions: [{ id: 'db', question: 'Database?' }] },
+            }
+            await new Promise<void>((resolve) => { releaseCancel = resolve })
+            await abortWait(signal)
+          },
+        }
+      },
+    })
+
+    await api.call(call('workspace.list', {}))
+    expect(open.mock.calls[0]?.[3]).toBe(peer)
+
+    await api.call(call('session.models', {}))
+    expect(invoke.mock.calls[0]?.[0]).toMatchObject({ peer })
+
+    await expect(api.call(call('session.prompt', {
+      sessionId: 'session-1',
+      mode: 'queue',
+      content: [],
+    }, 'prompt-peer'))).resolves.toEqual({ ok: true, value: { accepted: true } })
+
+    const abort = new AbortController()
+    const events = api.events(abort.signal)[Symbol.asyncIterator]()
+    await expect(events.next()).resolves.toMatchObject({
+      value: { rpcId: 'question-peer', method: 'question/requested' },
+    })
+    expect(open).toHaveBeenCalledWith('$events', { args: {} }, expect.anything(), peer, expect.any(AbortSignal))
+
+    await api.respond('question-peer', {
+      ok: true,
+      value: {
+        sessionId: 'session-1',
+        answer: { answers: [{ id: 'db', selected: ['SQLite'] }] },
+      },
+    }, abort.signal)
+    expect(fetch.mock.calls[0]?.[1]).toBe(peer)
+
+    releaseCancel?.()
+    abort.abort()
+    await events.return?.()
+  })
+
+  it('leaves the Peer slot undefined on kernels that expose no createPeer', async () => {
+    const { api, open, invoke } = harness({
+      open: async (_endpoint, _payload, _uplink, _peer, _signal) => ({
+        async *[Symbol.asyncIterator]() {
+          yield { type: 'baseline', value: { items: [] } }
+        },
+      }),
+    })
+
+    await api.call(call('workspace.list', {}))
+    expect(open.mock.calls[0]?.[3]).toBeUndefined()
+
+    await api.call(call('session.models', {}))
+    expect(invoke.mock.calls[0]?.[0]).toMatchObject({ peer: undefined })
+  })
+})
 
 describe('dsh 0.2 Remote Host adapter', () => {
   it.each([
