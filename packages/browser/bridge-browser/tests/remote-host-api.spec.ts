@@ -19,6 +19,7 @@ function harness(options: {
   invoke?: TypertGatewayLike['invoke']
   open?: TypertGatewayLike['wireStream']['open']
   fetch?: (request: Request) => Promise<Response>
+  connection?: Partial<HostConnectionLike>
 } = {}) {
   const invoke = vi.fn(options.invoke ?? (async () => ({ accepted: true })))
   const open = vi.fn(options.open ?? (async (_endpoint, _payload, _uplink, _peer, signal) => ({
@@ -46,6 +47,7 @@ function harness(options: {
   }
   const connection: HostConnectionLike = {
     createSharedFetchHandler: () => ({ fetch }),
+    ...options.connection,
   }
   return { api: createRemoteHostApi(gateway, connection), invoke, open, fetch, requestBodies }
 }
@@ -779,5 +781,50 @@ describe('dsh 0.2 Remote Host adapter', () => {
     })
     abort.abort()
     await expect(pending).resolves.toEqual({ done: true, value: undefined })
+  })
+})
+
+describe('dsh 0.2.1 Peer scope', () => {
+  const browserPeer = { id: 'peer-browser', principal: { kind: 'owner' }, signal: new AbortController().signal }
+
+  it('names the Connection browser Peer on every Gateway call', async () => {
+    const open = vi.fn(async (_endpoint: string, _payload: unknown, _uplink: unknown, _peer: unknown, signal: AbortSignal) => ({
+      async *[Symbol.asyncIterator]() {
+        yield { type: 'ready', clientId: 'test', host: {} }
+        await abortWait(signal)
+      },
+    }))
+    const invoke = vi.fn(async () => ({ default: null, routableProviders: [], groups: [], failures: [] }))
+    const { api } = harness({ connection: { browserPeer }, open, invoke })
+    const controller = new AbortController()
+    const pending = api.events(controller.signal)[Symbol.asyncIterator]().next()
+    await vi.waitFor(() => expect(open).toHaveBeenCalled())
+    await api.call(call('session.models', {}))
+    controller.abort()
+    await pending.catch(() => undefined)
+
+    // dsh 0.2.1 made `peer` mandatory: Gateway dereferences peer.signal on open.
+    expect(open.mock.calls[0]?.[3]).toBe(browserPeer)
+    expect(invoke.mock.calls[0]?.[0]).toMatchObject({ peer: browserPeer })
+  })
+
+  it('mints an owner Peer when the Connection exposes only createPeer', async () => {
+    const created = { id: 'peer-created', principal: { kind: 'owner' }, signal: new AbortController().signal }
+    const createPeer = vi.fn(() => created)
+    const invoke = vi.fn(async () => ({ default: null, routableProviders: [], groups: [], failures: [] }))
+    const { api } = harness({ connection: { createPeer }, invoke })
+    await api.call(call('session.models', {}))
+
+    expect(createPeer).toHaveBeenCalledWith({ principal: { kind: 'owner' } })
+    expect(invoke.mock.calls[0]?.[0]).toMatchObject({ peer: created })
+  })
+
+  it('leaves the Peer slot undefined on runtimes that never ask for one', async () => {
+    const invoke = vi.fn(async () => ({ default: null, routableProviders: [], groups: [], failures: [] }))
+    const { api } = harness({ invoke })
+    await api.call(call('session.models', {}))
+
+    // dsh 0.2.0 tolerates an absent Peer; keep omitting it there.
+    expect(invoke.mock.calls[0]?.[0].peer).toBeUndefined()
   })
 })
