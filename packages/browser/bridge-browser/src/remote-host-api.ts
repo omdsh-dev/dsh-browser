@@ -44,6 +44,7 @@ export interface TypertGatewayLike {
     readonly method: string
     readonly args: Readonly<Record<string, unknown>>
     readonly signal?: AbortSignal
+    readonly peer?: unknown
   }): Promise<unknown>
 }
 
@@ -65,18 +66,20 @@ const EMPTY_WIRE_UPLINK: AsyncIterable<unknown> = {
  *   these as three-arg maps AbortSignal onto uplink and leaves signal
  *   undefined (hello.ok → stream-failed → WS 1011).
  */
-function openWireStream(gateway: TypertGatewayLike, endpoint: string, payload: unknown, signal: AbortSignal): Promise<AsyncIterable<unknown>> {
+function openWireStream(gateway: TypertGatewayLike, endpoint: string, payload: unknown, signal: AbortSignal, peer?: unknown): Promise<AsyncIterable<unknown>> {
   const open = gateway.wireStream.open
   if (open.length === 3) {
     return open(endpoint, payload, signal)
   }
-  return open(endpoint, payload, EMPTY_WIRE_UPLINK, undefined, signal)
+  return open(endpoint, payload, EMPTY_WIRE_UPLINK, peer, signal)
 }
 
 /** Structural subset of dsh 0.2's Host Connection service. */
 export interface HostConnectionLike {
+  /** The owner Peer every authenticated browser connection shares (dsh 0.2.1). */
+  readonly browserPeer?: unknown
   createSharedFetchHandler(channel: '/api'): {
-    fetch(request: Request): Promise<Response>
+    fetch(request: Request, peer?: unknown): Promise<Response>
   }
 }
 
@@ -116,12 +119,14 @@ class RemoteHostApi implements BrowserHostApi {
   /** Last known session/follow tip per Session; drives session/page throughSeq. */
   private readonly historyCursors = new Map<string, number>()
   private activeEvents: EventGeneration | undefined
+  private readonly peer: unknown
 
   constructor(
     private readonly gateway: TypertGatewayLike,
     connection: HostConnectionLike,
   ) {
     this.fetchHandler = connection.createSharedFetchHandler('/api')
+    this.peer = connection.browserPeer
   }
 
   async call(call: HostRpcCall): Promise<HostRpcResult> {
@@ -145,6 +150,7 @@ class RemoteHostApi implements BrowserHostApi {
         method: target.method,
         args: target.args,
         signal: call.signal,
+        peer: this.peer
       })
       // Only claim ownership after a successful create/prompt. A failed prompt
       // against a Desktop session must not steal later ask_user_question away
@@ -167,6 +173,7 @@ class RemoteHostApi implements BrowserHostApi {
       this.extensionSessions,
       this.noteHistoryCursor.bind(this),
       signal,
+      this.peer,
     )
     const previous = this.activeEvents
     this.activeEvents = generation
@@ -212,6 +219,7 @@ class RemoteHostApi implements BrowserHostApi {
             },
           },
           signal: call.signal,
+          peer: this.peer
         })
         return { ok: true, value: historyPageValue(page) }
       }
@@ -233,10 +241,12 @@ class RemoteHostApi implements BrowserHostApi {
     try {
       const catalog = await this.gateway.invoke({
         namespace: 'session', method: 'modelCatalog', args: {}, signal: call.signal,
+        peer: this.peer
       })
       // Provisional Sessions request only the catalog and overlay their pending choice.
       const projections = sessionId === undefined ? undefined : await this.gateway.invoke({
         namespace: 'session', method: 'projections', args: { request: { sessionId } }, signal: call.signal,
+        peer: this.peer
       })
       const values = isRecord(projections) ? projections.values : undefined
       const modelSelection = isRecord(values) ? values.modelSelection : undefined
@@ -277,7 +287,7 @@ class RemoteHostApi implements BrowserHostApi {
     try {
       const controller = new AbortController()
       const signal = AbortSignal.any([call.signal, controller.signal])
-      const source = await openWireStream(this.gateway, 'workspace/follow', { args: {} }, signal)
+      const source = await openWireStream(this.gateway, 'workspace/follow', { args: {} }, signal, this.peer)
       const iterator = source[Symbol.asyncIterator]()
       try {
         const first = await iterator.next()
@@ -320,7 +330,7 @@ class RemoteHostApi implements BrowserHostApi {
       }),
       signal,
     })
-    const response = await this.fetchHandler.fetch(request)
+    const response = await this.fetchHandler.fetch(request, this.peer)
     if (!response.ok) {
       throw new Error(`$events/result transport failed with HTTP ${String(response.status)}: ${await response.text()}`)
     }
@@ -380,6 +390,7 @@ class EventGeneration {
     private readonly extensionSessions: ExtensionSessionRegistry,
     private readonly onHistoryCursor: (sessionId: string, cursor: number) => void,
     outerSignal: AbortSignal,
+    private readonly peer: unknown,
   ) {
     this.signal = AbortSignal.any([outerSignal, this.lifetime.signal])
   }
@@ -549,7 +560,7 @@ class EventGeneration {
 
   private async pumpRemoteEvents(): Promise<void> {
     try {
-      const source = await openWireStream(this.gateway, '$events', { args: {} }, this.signal)
+      const source = await openWireStream(this.gateway, '$events', { args: {} }, this.signal, this.peer)
       let ready = false
       for await (const value of source) {
         if (!ready) {
