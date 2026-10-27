@@ -69,6 +69,11 @@ export interface PanelCopy {
     back: string
     eyebrow: string
     title: string
+    language: string
+    languageHelp: string
+    languageAuto: string
+    languageEnglish: string
+    languageChinese: string
     bridgeAddress: string
     bridgeHelp: string
     bridgePlaceholder: string
@@ -366,6 +371,11 @@ const EN: PanelCopy = {
     back: 'Back to chat',
     eyebrow: 'Browser assistant',
     title: 'Settings',
+    language: 'Language',
+    languageHelp: 'Language of the assistant panel and its notifications. Takes effect immediately.',
+    languageAuto: 'Automatic (follow Chrome)',
+    languageEnglish: 'English',
+    languageChinese: '中文',
     bridgeAddress: 'Bridge address',
     bridgeHelp: 'Leave blank to detect a local service automatically',
     bridgePlaceholder: 'Auto-detect (desktop beacon 43189–43198 included)',
@@ -665,6 +675,11 @@ const ZH: PanelCopy = {
     back: '返回对话',
     eyebrow: '浏览器助手',
     title: '设置',
+    language: '界面语言',
+    languageHelp: '助手侧栏与通知所用语言，切换后立即生效。',
+    languageAuto: '自动（跟随 Chrome）',
+    languageEnglish: 'English',
+    languageChinese: '中文',
     bridgeAddress: '桥地址',
     bridgeHelp: '留空时自动检测本机服务',
     bridgePlaceholder: '自动检测（含桌面版信标 43189–43198）',

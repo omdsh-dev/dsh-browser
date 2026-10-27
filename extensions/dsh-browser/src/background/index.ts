@@ -71,7 +71,7 @@ import {
   type ApprovalPrompt,
   type ApprovalRequest,
 } from '../security/approval.ts'
-import { getUiLocale } from '../i18n.ts'
+import { getUiLocale, loadUiLocalePreference, watchUiLocalePreference } from '../i18n.ts'
 import { InteractionResponseRouter } from './responses.ts'
 import {
   actionCoveredByTrustedOrigins,
@@ -509,6 +509,12 @@ function normalizeSettings(candidate: Settings): Settings {
     autoResumeSession: candidate.autoResumeSession !== false,
   }
 }
+
+// The side panel owns the UI language preference, but approval notifications
+// and tool error strings are formatted here, so mirror the same key into this
+// worker's cache and keep following panel writes.
+void loadUiLocalePreference()
+watchUiLocalePreference()
 
 /** Settings load is shared by every lazy connection trigger. */
 let settingsLoaded = false

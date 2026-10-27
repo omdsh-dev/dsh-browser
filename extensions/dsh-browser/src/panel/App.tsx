@@ -7,7 +7,7 @@
  * @module
  */
 
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { BRIDGE_SESSION_PURGE_METHOD, DEFAULT_SNAPSHOT_MAX_CHARS } from '@yuxianglin/dsh-bridge-browser/src/protocol.ts'
 import type { BridgeCaps } from '@yuxianglin/dsh-bridge-browser/src/protocol.ts'
 import type { ServerFrame } from '@yuxianglin/dsh-bridge-browser/src/protocol.ts'
@@ -17,7 +17,14 @@ import { connectPanel, PanelRpcError, type BridgeInstance, type DevToolsStatus, 
 import { renderMarkdown } from './markdown.ts'
 import whaleUrl from '../../assets/icons/deepseek-256.png'
 import type { ApprovalDecision, ApprovalRequest } from '../security/approval.ts'
-import { getUiLocale } from '../i18n.ts'
+import {
+  getUiLocale,
+  getUiLocalePreference,
+  saveUiLocalePreference,
+  watchUiLocalePreference,
+  type UiLocale,
+  type UiLocalePreference,
+} from '../i18n.ts'
 import { PANEL_COPY, type PanelCopy } from './strings.ts'
 import {
   applyUiScale,
@@ -739,7 +746,8 @@ const ToolActivity = memo(function ToolActivity({ row, copy }: { row: Row; copy:
 })
 
 export function App(): React.JSX.Element {
-  const locale = useMemo(() => getUiLocale(), [])
+  const [locale, setLocale] = useState<UiLocale>(() => getUiLocale())
+  const [localePreference, setLocalePreference] = useState<UiLocalePreference>(() => getUiLocalePreference())
   const copy = PANEL_COPY[locale]
   const [api] = useState<PanelApi>(() => connectPanel())
   const [state, setState] = useState<BridgeState>('stopped')
@@ -919,6 +927,25 @@ export function App(): React.JSX.Element {
     setUiScale(next)
     applyUiScale(next)
     saveUiScale(next)
+  }
+
+  // UI language: the choice lives in storage (see `i18n.ts`), so this view
+  // applies it immediately and keeps the document language/title in sync. The
+  // watcher catches a change made from another side-panel window.
+  useEffect(() => {
+    document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en'
+    document.title = copy.documentTitle
+  }, [locale, copy])
+
+  useEffect(() => watchUiLocalePreference((preference) => {
+    setLocalePreference(preference)
+    setLocale(getUiLocale())
+  }), [])
+
+  function changeUiLocale(next: UiLocalePreference): void {
+    saveUiLocalePreference(next)
+    setLocalePreference(getUiLocalePreference())
+    setLocale(getUiLocale())
   }
 
   // Settings: seed from storage, then let the panel own the form.
@@ -2545,6 +2572,20 @@ export function App(): React.JSX.Element {
           </div>
         </div>
         <UpdateCard copy={copy.update} />
+        <div className="settings-panel">
+          <label>
+            <span>{copy.settings.language}</span>
+            <small>{copy.settings.languageHelp}</small>
+            <select
+              value={localePreference}
+              onChange={(event) => changeUiLocale(event.target.value as UiLocalePreference)}
+            >
+              <option value="auto">{copy.settings.languageAuto}</option>
+              <option value="en">{copy.settings.languageEnglish}</option>
+              <option value="zh">{copy.settings.languageChinese}</option>
+            </select>
+          </label>
+        </div>
         <div className="settings-panel">
           <label>
             <span>{copy.settings.bridgeAddress}</span>
