@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url'
 import path from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import Storage from '@deepseek-ai/dsh-storage'
 import * as StorageJson from '@deepseek-ai/dsh-storage-json'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
@@ -47,7 +47,7 @@ async function makeSession(root: string, workspace: string, sessionId: string): 
 async function contendForSession(root: string): Promise<unknown> {
   const child = spawn(process.execPath, ['--input-type=module', '-e', `
     import { Context } from ${JSON.stringify(resolveModule('@deepseek-ai/cordis'))}
-    import JsonlSessionPersistence from ${JSON.stringify(resolveModule('@deepseek-ai/dsh-session-persistence-jsonl'))}
+    import * as JsonlSessionPersistence from ${JSON.stringify(resolveModule('@deepseek-ai/dsh-session-persistence-jsonl'))}
     import { SESSION_FORMAT_VERSION, SessionId } from ${JSON.stringify(resolveModule('@deepseek-ai/dsh-session'))}
     const ctx = new Context()
     try {
@@ -260,7 +260,7 @@ describe('purgeSessionFiles', () => {
     const root = await makeSessionsRoot()
     const holder = spawn(process.execPath, ['--input-type=module', '-e', `
       import { Context } from ${JSON.stringify(resolveModule('@deepseek-ai/cordis'))}
-      import JsonlSessionPersistence from ${JSON.stringify(resolveModule('@deepseek-ai/dsh-session-persistence-jsonl'))}
+      import * as JsonlSessionPersistence from ${JSON.stringify(resolveModule('@deepseek-ai/dsh-session-persistence-jsonl'))}
       import { SESSION_FORMAT_VERSION, SessionId } from ${JSON.stringify(resolveModule('@deepseek-ai/dsh-session'))}
       const ctx = new Context()
       await ctx.plugin(JsonlSessionPersistence, { root: process.argv[1], compression: 'none' })

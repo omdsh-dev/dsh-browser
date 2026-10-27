@@ -20,6 +20,7 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import WebSocket from 'ws'
+import { Peer, type PeerOptions } from '@deepseek-ai/dsh-client-connection'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
@@ -58,7 +59,7 @@ const RemoteApiHost = {
   apply(ctx: Context, config: { cwd: string }): void {
     const gateway = {
       wireStream: {
-        async open(endpoint: string, _payload: unknown, signal: AbortSignal): Promise<AsyncIterable<unknown>> {
+        async open(endpoint: string, _payload: unknown, _uplink: AsyncIterable<unknown>, _peer: unknown, signal: AbortSignal): Promise<AsyncIterable<unknown>> {
           if (endpoint === '$events') {
             return {
               async *[Symbol.asyncIterator]() {
@@ -101,6 +102,7 @@ const RemoteApiHost = {
       },
     }
     const connection = {
+      createPeer: (options: PeerOptions) => new Peer(ctx, options),
       createSharedFetchHandler: () => ({
         fetch: async (request: Request) => {
           const envelope = await request.json() as { rpcId: string }
