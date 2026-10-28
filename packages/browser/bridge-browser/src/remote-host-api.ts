@@ -44,6 +44,8 @@ export interface TypertGatewayLike {
     readonly method: string
     readonly args: Readonly<Record<string, unknown>>
     readonly signal?: AbortSignal
+    /** dsh 0.2.1: mandatory Peer the call speaks for (0.2.0 and older ignore it). */
+    readonly peer?: unknown
   }): Promise<unknown>
 }
 
@@ -54,6 +56,22 @@ export interface TypertGatewayLike {
  */
 const EMPTY_WIRE_UPLINK: AsyncIterable<unknown> = {
   async *[Symbol.asyncIterator]() { /* no uplink items */ },
+}
+
+/**
+ * A never-disposed owner Peer for Host-side calls.
+ *
+ * dsh 0.2.1 makes the Peer mandatory: `assertPeerLive(peer)` reads
+ * `peer.signal`, `requireInteractions(peer)` demands
+ * `peer.interactions === 'answer'`, and `openRemoteEvents` reads
+ * `peer.principal.kind` to decide whether forwarded events may be answered.
+ * Passing `undefined` throws `Cannot read properties of undefined
+ * (reading 'signal')` right after `hello.ok` (WS close 1011).
+ */
+const HOST_PEER = {
+  signal: new AbortController().signal,
+  principal: { kind: 'owner' as const },
+  interactions: 'answer' as const,
 }
 
 /**
@@ -70,7 +88,7 @@ function openWireStream(gateway: TypertGatewayLike, endpoint: string, payload: u
   if (open.length === 3) {
     return open(endpoint, payload, signal)
   }
-  return open(endpoint, payload, EMPTY_WIRE_UPLINK, undefined, signal)
+  return open(endpoint, payload, EMPTY_WIRE_UPLINK, HOST_PEER, signal)
 }
 
 /** Structural subset of dsh 0.2's Host Connection service. */
@@ -107,7 +125,19 @@ export function createRemoteHostApi(
   gateway: TypertGatewayLike,
   connection: HostConnectionLike,
 ): BrowserHostApi {
-  return new RemoteHostApi(gateway, connection)
+  // dsh 0.2.1 validates `request.peer` inside prepareInvocation, while every call
+  // site in this module passes only { namespace, method, args, signal }. Wrap the
+  // gateway once instead of editing every call site.
+  // `Object.create` keeps the prototype chain: TypertGatewayService methods live
+  // on the prototype, so spreading into an object literal would drop them.
+  const withPeer = Object.create(gateway) as TypertGatewayLike
+  Object.defineProperty(withPeer, 'invoke', {
+    value: (request: Parameters<TypertGatewayLike['invoke']>[0]) =>
+      gateway.invoke({ ...request, peer: HOST_PEER }),
+    configurable: true,
+    writable: true,
+  })
+  return new RemoteHostApi(withPeer, connection)
 }
 
 class RemoteHostApi implements BrowserHostApi {
