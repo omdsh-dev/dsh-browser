@@ -1,27 +1,30 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import { accumulateOffset, toViewportPoint } from '../src/shared/frame-geometry.ts'
+import { framePointMapper } from '../src/shared/frame-geometry.ts'
 
-describe('accumulateOffset', () => {
-  it('is zero without frames', () => {
-    expect(accumulateOffset([])).toEqual({ x: 0, y: 0 })
+describe('framePointMapper', () => {
+  it('maps a translated viewport with unequal scaling', () => {
+    const map = framePointMapper([100, 50, 500, 50, 500, 350, 100, 350], 200, 100)
+    expect(map({ x: 40, y: 20 })).toEqual({ x: 180, y: 110 })
   })
 
-  it('adds each frame placement including its borders', () => {
-    expect(accumulateOffset([
-      { left: 120, top: 40, clientLeft: 1, clientTop: 1 },
-      { left: 10, top: 20, clientLeft: 2, clientTop: 0 },
-    ])).toEqual({ x: 133, y: 61 })
-  })
-})
-
-describe('toViewportPoint', () => {
-  it('translates a frame-local point into the top-level viewport', () => {
-    const edges = [{ left: 100, top: 50, clientLeft: 0, clientTop: 0 }]
-    expect(toViewportPoint(edges, { x: 5, y: 7 })).toEqual({ x: 105, y: 57 })
+  it('maps a rotated viewport', () => {
+    const map = framePointMapper([300, 100, 300, 300, 200, 300, 200, 100], 200, 100)
+    expect(map({ x: 40, y: 20 })).toEqual({ x: 280, y: 140 })
   })
 
-  it('keeps top-level coordinates unchanged', () => {
-    expect(toViewportPoint([], { x: 5, y: 7 })).toEqual({ x: 5, y: 7 })
+  it('uses perspective division inside a trapezoid', () => {
+    const map = framePointMapper([0, 0, 100, 0, 80, 100, 20, 100], 100, 100)
+    const center = map({ x: 50, y: 50 })
+    expect(center.x).toBeCloseTo(50)
+    expect(center.y).toBeCloseTo(62.5)
+    expect(map({ x: 100, y: 100 }).x).toBeCloseTo(80)
+  })
+
+  it('rejects missing, collapsed, and non-finite geometry', () => {
+    expect(() => framePointMapper([], 100, 100)).toThrow()
+    expect(() => framePointMapper([0, 0, 0, 0, 0, 0, 0, 0], 100, 100)).toThrow()
+    expect(() => framePointMapper([0, 0, 100, 0, 100, 100, 0, 100], 0, 100)).toThrow()
+    expect(() => framePointMapper([0, 0, Infinity, 0, 100, 100, 0, 100], 100, 100)).toThrow()
   })
 })

@@ -37,11 +37,12 @@ import {
   type PointerAction,
 } from './input-actions.ts'
 import { isModifierName, type ModifierName } from './keys.ts'
-import { toViewportPoint, type Point } from '../shared/frame-geometry.ts'
+import type { Point } from '../shared/frame-geometry.ts'
 import type { InputSetupRequest, InputSetupResult, MeasuredTarget } from '../shared/input-setup.ts'
 import { writeClipboard } from './clipboard-write.ts'
 import type { ClipboardWriteOutcome } from '../shared/clipboard.ts'
 import { resolveDebuggerFrame } from './debugger-frame.ts'
+import { resolveFrameInputTarget } from './debugger-geometry.ts'
 
 /** A tool call from the bridge. */
 export interface ToolCall {
@@ -468,20 +469,6 @@ async function resolveFramePoint(tabId: number, frame: TabFrame, args: Record<st
   return { point, label: `${identity} center` }
 }
 
-/** The frame-owner chain used to translate frame coordinates into the tab viewport. */
-async function frameEdges(tabId: number, frame: TabFrame): Promise<import('../shared/frame-geometry.ts').FrameEdge[]> {
-  const setup = await sendInputSetup(tabId, frame, { op: 'offset' })
-  if (setup.op !== 'offset') {
-    throw new InputSetupError('action-failed', 'The page returned an unexpected frame geometry result.')
-  }
-  return setup.edges
-}
-
-/** Translate one explicit point from frame coordinates into the tab viewport. */
-async function viewportPointFor(tabId: number, frame: TabFrame, point: Point): Promise<Point> {
-  return toViewportPoint(await frameEdges(tabId, frame), point)
-}
-
 /** Rough plain text of an HTML fragment, used as the clipboard text flavor. */
 function plainTextFromHtml(html: string): string {
   return html
@@ -790,7 +777,6 @@ async function trustedClick(
   }
   const input = requireInput(runtime)
   const local = await resolveFramePoint(tabId, frame, args)
-  const point = await viewportPointFor(tabId, frame, local.point)
   const modifiers = requestedModifiers(args)
   const button = args.button === 'right' ? 'right' : args.button === 'middle' ? 'middle' : 'left'
   const clicks = typeof args.clicks === 'number' ? args.clicks : undefined
@@ -799,16 +785,17 @@ async function trustedClick(
   if (action === 'drag') {
     const destination = finitePoint(args.to)
     if (destination === undefined) throw new InputError('bad-args', 'drag needs a destination point (to).')
-    to = await viewportPointFor(tabId, frame, destination)
+    to = destination
   }
   await input.run(tabId, async (client) => {
-    await dispatchPointer(client, inputStates.get(tabId), {
+    const target = await resolveFrameInputTarget(client, tabId, frame)
+    await dispatchPointer(target.client, inputStates.get(tabId), {
       action,
-      point,
+      point: target.mapPoint(local.point),
       button,
       modifiers,
       ...(clicks === undefined ? {} : { clicks }),
-      ...(to === undefined ? {} : { to }),
+      ...(to === undefined ? {} : { to: target.mapPoint(to) }),
       ...(steps === undefined ? {} : { steps }),
     })
   })
@@ -937,9 +924,9 @@ async function trustedWheel(
     ? args.deltaY
     : direction === 'up' ? -amount : direction === 'down' ? amount : 0
   const modifiers = requestedModifiers(args)
-  const point = await viewportPointFor(tabId, frame, local)
   await input.run(tabId, async (client) => {
-    await dispatchWheel(client, inputStates.get(tabId), { point, deltaX, deltaY, modifiers })
+    const target = await resolveFrameInputTarget(client, tabId, frame)
+    await dispatchWheel(target.client, inputStates.get(tabId), { point: target.mapPoint(local), deltaX, deltaY, modifiers })
   })
   return settleAfterInput(
     tabId,

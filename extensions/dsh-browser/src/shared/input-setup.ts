@@ -8,8 +8,6 @@
  * @module
  */
 
-import type { FrameEdge } from './frame-geometry.ts'
-
 /** Element geometry inside one frame's viewport. */
 export interface ElementRect {
   x: number
@@ -22,7 +20,6 @@ export interface ElementRect {
 export type InputSetupRequest =
   | { op: 'measure'; index?: number; selector?: string }
   | { op: 'prepare'; index?: number; selector?: string; select?: 'none' | 'contents' | 'end' }
-  | { op: 'offset' }
   | { op: 'upload-mark'; token: string; index?: number; selector?: string }
   | { op: 'upload-clear'; token: string }
 
@@ -39,6 +36,5 @@ export interface MeasuredTarget {
 export type InputSetupResult =
   | { op: 'measure'; measure: MeasuredTarget }
   | { op: 'prepare'; focused: boolean; selected: boolean }
-  | { op: 'offset'; edges: FrameEdge[] }
   | { op: 'upload-mark'; selector: string }
   | { op: 'upload-clear'; cleared: boolean }

@@ -115,9 +115,9 @@ function requireStroke(key: string): KeyStroke {
   return stroke
 }
 
-/** Round to whole CSS pixels; CDP requires integer coordinates. */
+// 保留 CSS 像素的小数，避免框架缩放后放大取整误差。
 function pointOf(point: Point): { x: number; y: number } {
-  return { x: Math.round(point.x), y: Math.round(point.y) }
+  return { x: point.x, y: point.y }
 }
 
 /** Union of held modifiers and the request's own modifiers. */

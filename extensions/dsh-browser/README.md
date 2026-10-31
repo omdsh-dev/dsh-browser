@@ -30,6 +30,8 @@ Browser pages are rendered as structured text with a numbered interactive-elemen
 | Chat with images | `session.prompt` / `session.attachment` | Host-gated image selection, image-only sends, and durable history previews |
 | Quote what you highlight | side panel composer | The text you select in the page becomes a quote in the composer and rides along with your next message |
 
+Chrome's trusted pointer and wheel input supports cross-origin and nested iframes, including frames in separate renderer processes. Points are relative to the selected frame's viewport; browser-provided geometry accounts for scrolling, borders, padding, scaling, rotation, and perspective transforms.
+
 ## Architecture
 
 ```
@@ -179,7 +181,6 @@ Chrome uses `sidePanel`; Firefox uses `sidebar_action`. Both request `storage` (
 - Developer tools require Chrome 125+, a setting/session grant or per-call approval, and an available debugger connection. Chrome shows its debugging banner while the connection remains attached, including during network capture.
 - Tab affinity is global to that extension connection rather than per chat session.
 - Accessible cross-origin iframes are snapshotted and operated with stable `(frame, index)` addresses. Restricted or short-lived frames are reported as unavailable without failing the whole page snapshot.
-- Trusted coordinate input requires accessible frame geometry. Cross-origin frame geometry that the content script cannot read is rejected; element-based content actions, frame uploads, and developer-tools targeting remain available.
 - Captcha/image-only controls cannot be handled — the tool result reports "elements with no accessible name" and asks the user to complete that step manually.
 - No automatic token rotation.
 - Synthetic `browser_press` events do not trigger browser-native default actions such as Tab focus movement, arrow-key scrolling, or Enter activation. Chrome's trusted input channel supports these actions; Firefox uses synthetic input.

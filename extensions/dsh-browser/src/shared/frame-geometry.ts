@@ -1,25 +1,4 @@
-/**
- * Frame geometry shared by the content script and the background.
- *
- * A pointer action addresses coordinates inside one frame's viewport, while
- * the browser's trusted input dispatcher expects coordinates in the tab's
- * top-level viewport. Each frame reports the placement of its own `<iframe>`
- * inside its parent, innermost first; the background sums the chain.
- *
- * @module
- */
-
-/** Placement of one frame's owner element inside its parent's viewport. */
-export interface FrameEdge {
-  /** Owner border box's left edge in the parent viewport (CSS pixels). */
-  left: number
-  /** Owner border box's top edge in the parent viewport (CSS pixels). */
-  top: number
-  /** Left border width of the owner element. */
-  clientLeft: number
-  /** Top border width of the owner element. */
-  clientTop: number
-}
+import { Matrix, solve } from 'ml-matrix'
 
 /** A point in CSS pixels. */
 export interface Point {
@@ -27,30 +6,25 @@ export interface Point {
   y: number
 }
 
-/**
- * Sum a frame-owner chain into the tab's top-level viewport offset.
- *
- * @param edges - placements from the target frame outwards (order is irrelevant to the sum).
- * @returns the offset to add to a frame-local coordinate.
- */
-export function accumulateOffset(edges: readonly FrameEdge[]): Point {
-  let x = 0
-  let y = 0
-  for (const edge of edges) {
-    x += edge.left + edge.clientLeft
-    y += edge.top + edge.clientTop
+// 将 iframe 的局部视口投影到 CDP 返回的 content quad，包含 CSS 变换和透视。
+export function framePointMapper(quad: readonly number[], width: number, height: number): (point: Point) => Point {
+  if (quad.length !== 8 || !quad.every(Number.isFinite) || !Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    throw new Error('The target frame has no usable viewport geometry.')
   }
-  return { x, y }
-}
-
-/**
- * Translate a frame-local point into top-level viewport coordinates.
- *
- * @param edges - frame-owner chain for the point's frame.
- * @param point - coordinates inside that frame's viewport.
- * @returns top-level viewport coordinates.
- */
-export function toViewportPoint(edges: readonly FrameEdge[], point: Point): Point {
-  const offset = accumulateOffset(edges)
-  return { x: offset.x + point.x, y: offset.y + point.y }
+  const corners = [[0, 0], [1, 0], [1, 1], [0, 1]] as const
+  const rows = corners.flatMap(([u, v], index) => {
+    const x = quad[index * 2]!
+    const y = quad[index * 2 + 1]!
+    return [[u, v, 1, 0, 0, 0, -x * u, -x * v], [0, 0, 0, u, v, 1, -y * u, -y * v]]
+  })
+  const coefficients = solve(new Matrix(rows), Matrix.columnVector([...quad])).to1DArray()
+  return (point) => {
+    const u = point.x / width
+    const v = point.y / height
+    const denominator = coefficients[6]! * u + coefficients[7]! * v + 1
+    const x = (coefficients[0]! * u + coefficients[1]! * v + coefficients[2]!) / denominator
+    const y = (coefficients[3]! * u + coefficients[4]! * v + coefficients[5]!) / denominator
+    if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error('The target point has no finite viewport position.')
+    return { x, y }
+  }
 }

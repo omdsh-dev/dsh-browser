@@ -75,8 +75,6 @@ function stubChrome(frameOverride: typeof FRAMES = FRAMES): Harness {
           }
         case 'prepare':
           return { ok: true, result: { op: 'prepare', focused: true, selected: false } }
-        case 'offset':
-          return { ok: true, result: { op: 'offset', edges: [{ left: 100, top: 50, clientLeft: 0, clientTop: 0 }] } }
         case 'upload-mark':
           return { ok: true, result: { op: 'upload-mark', selector: 'input[data-dsh-upload="t"]' } }
         case 'upload-clear':
@@ -167,17 +165,16 @@ describe('trusted routing', () => {
     const answer = await run({
       id: '1',
       name: 'browser_click',
-      args: { point: { x: 10, y: 20 }, frame: 1 },
+      args: { point: { x: 10, y: 20 }, frame: 0 },
     }, h, fakeRuntime(h))
     expect(answer.ok).toBe(true)
     expect(h.runs).toHaveLength(1)
     const events = h.runs[0]!.methods.filter(([method]) => method === 'Input.dispatchMouseEvent')
     expect(events).toHaveLength(2)
-    // Frame offset (100,50) is added to the frame-local point (10,20).
-    expect(events[0]![1]).toMatchObject({ x: 110, y: 70, type: 'mousePressed' })
+    expect(events[0]![1]).toMatchObject({ x: 10, y: 20, type: 'mousePressed' })
     expect(JSON.stringify(answer.result)).toContain('(trusted)')
     expect(JSON.stringify(answer.result)).not.toContain('changed-after-input')
-    expect(h.chrome.tabs.sendMessage).toHaveBeenCalledWith(42, expect.objectContaining({ action: 'browser_wait', includePageDelta: false }), { documentId: 'doc-frame' })
+    expect(h.chrome.tabs.sendMessage).toHaveBeenCalledWith(42, expect.objectContaining({ action: 'browser_wait', includePageDelta: false }), { documentId: 'doc-main' })
     expect(h.actions.map((action) => action.name)).toEqual(['browser_wait'])
   })
 
@@ -200,10 +197,9 @@ describe('trusted routing', () => {
   it('measures an element before a trusted click', async () => {
     const h = stubChrome()
     await run({ id: '1', name: 'browser_click', args: { selector: '#target', trusted: true } }, h, fakeRuntime(h))
-    expect(h.setups.map((setup) => setup.request.op)).toEqual(['measure', 'offset'])
+    expect(h.setups.map((setup) => setup.request.op)).toEqual(['measure'])
     const events = h.runs[0]!.methods.filter(([method]) => method === 'Input.dispatchMouseEvent')
-    // Element center (10+15, 20+20) plus the frame offset (100,50).
-    expect(events[0]![1]).toMatchObject({ x: 125, y: 90 })
+    expect(events[0]![1]).toMatchObject({ x: 25, y: 40 })
   })
 
   it('falls back to synthetic keys and marks the result', async () => {
@@ -247,11 +243,11 @@ describe('trusted routing', () => {
     expect(h.runs).toHaveLength(0)
   })
 
-  it('dispatches a wheel at the translated point', async () => {
+  it('dispatches a wheel at the top-level viewport point', async () => {
     const h = stubChrome()
     await run({ id: '1', name: 'browser_scroll', args: { point: { x: 2, y: 3 }, deltaY: 120 } }, h, fakeRuntime(h))
     const wheel = h.runs[0]!.methods.find(([method]) => method === 'Input.dispatchMouseEvent')
-    expect(wheel?.[1]).toMatchObject({ type: 'mouseWheel', x: 102, y: 53, deltaY: 120 })
+    expect(wheel?.[1]).toMatchObject({ type: 'mouseWheel', x: 2, y: 3, deltaY: 120 })
   })
 
   it('keeps a synthetic paste in the content script', async () => {

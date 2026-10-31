@@ -40,7 +40,7 @@ describe('dispatchPointer', () => {
     const state = new InputState()
     await dispatchPointer(client, state, { action: 'click', point: { x: 10.4, y: 20.6 } })
     expect(calls.map((call) => call.method)).toEqual(['Input.dispatchMouseEvent', 'Input.dispatchMouseEvent'])
-    expect(calls[0]!.params).toMatchObject({ type: 'mousePressed', x: 10, y: 21, button: 'left', buttons: 1, clickCount: 1 })
+    expect(calls[0]!.params).toMatchObject({ type: 'mousePressed', x: 10.4, y: 20.6, button: 'left', buttons: 1, clickCount: 1 })
     expect(calls[1]!.params).toMatchObject({ type: 'mouseReleased', buttons: 0 })
     expect(state.buttonsMask()).toBe(0)
   })
