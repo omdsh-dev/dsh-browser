@@ -3,10 +3,10 @@
  *
  * A tab can have exactly one debugger attachment, but two features need it:
  * the developer-tools group (inspection, page JavaScript, network capture) and
- * trusted input (real pointer, keyboard, and text delivery). The broker owns
+ * trusted input (keyboard, text delivery, and file uploads). The broker owns
  * the per-tab session, counts the features that hold it, and decides when the
  * attachment can be dropped — immediately when the developer tools stop, and
- * after an idle window for input so a sequence of clicks does not re-attach
+ * after an idle window for input so a sequence of keystrokes does not re-attach
  * between every call.
  *
  * @module

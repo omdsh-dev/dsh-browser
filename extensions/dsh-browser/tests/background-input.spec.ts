@@ -59,20 +59,6 @@ function stubChrome(frameOverride: typeof FRAMES = FRAMES): Harness {
       const request = (message.request ?? {}) as Record<string, unknown>
       setups.push({ request, frameId })
       switch (request.op) {
-        case 'measure':
-          return {
-            ok: true,
-            result: {
-              op: 'measure',
-              measure: {
-                rect: { x: 10, y: 20, width: 30, height: 40 },
-                selector: '#target',
-                editable: true,
-                focusable: true,
-                visible: true,
-              },
-            },
-          }
         case 'prepare':
           return { ok: true, result: { op: 'prepare', focused: true, selected: false } }
         case 'upload-mark':
@@ -160,46 +146,12 @@ afterEach(() => {
 })
 
 describe('trusted routing', () => {
-  it('sends a coordinate click through real input at viewport coordinates', async () => {
-    const h = stubChrome()
-    const answer = await run({
-      id: '1',
-      name: 'browser_click',
-      args: { point: { x: 10, y: 20 }, frame: 0 },
-    }, h, fakeRuntime(h))
-    expect(answer.ok).toBe(true)
-    expect(h.runs).toHaveLength(1)
-    const events = h.runs[0]!.methods.filter(([method]) => method === 'Input.dispatchMouseEvent')
-    expect(events).toHaveLength(2)
-    expect(events[0]![1]).toMatchObject({ x: 10, y: 20, type: 'mousePressed' })
-    expect(JSON.stringify(answer.result)).toContain('(trusted)')
-    expect(JSON.stringify(answer.result)).not.toContain('changed-after-input')
-    expect(h.chrome.tabs.sendMessage).toHaveBeenCalledWith(42, expect.objectContaining({ action: 'browser_wait', includePageDelta: false }), { documentId: 'doc-main' })
-    expect(h.actions.map((action) => action.name)).toEqual(['browser_wait'])
-  })
-
-  it('fails a coordinate click without a trusted channel', async () => {
-    const h = stubChrome()
-    const answer = await run({ id: '1', name: 'browser_click', args: { point: { x: 1, y: 2 } } }, h)
-    expect(answer.ok).toBe(false)
-    expect(answer.error?.code).toBe('input-unavailable')
-    expect(h.runs).toHaveLength(0)
-  })
-
   it('keeps an element click in the content script by default', async () => {
     const h = stubChrome()
     const answer = await run({ id: '1', name: 'browser_click', args: { selector: '#target' } }, h, fakeRuntime(h))
     expect(answer.ok).toBe(true)
     expect(h.runs).toHaveLength(0)
     expect(h.actions[0]).toMatchObject({ name: 'browser_click' })
-  })
-
-  it('measures an element before a trusted click', async () => {
-    const h = stubChrome()
-    await run({ id: '1', name: 'browser_click', args: { selector: '#target', trusted: true } }, h, fakeRuntime(h))
-    expect(h.setups.map((setup) => setup.request.op)).toEqual(['measure'])
-    const events = h.runs[0]!.methods.filter(([method]) => method === 'Input.dispatchMouseEvent')
-    expect(events[0]![1]).toMatchObject({ x: 25, y: 40 })
   })
 
   it('falls back to synthetic keys and marks the result', async () => {
@@ -226,28 +178,6 @@ describe('trusted routing', () => {
     await run({ id: '1', name: 'browser_type', args: { text: 'hello', selector: '#target', mode: 'insert' } }, h, fakeRuntime(h))
     expect(h.setups[0]!.request).toMatchObject({ op: 'prepare', selector: '#target', select: 'none' })
     expect(h.runs[0]!.methods.filter(([method]) => method === 'Input.insertText')).toHaveLength(1)
-  })
-
-  it('rejects a wheel gesture without a trusted channel', async () => {
-    const h = stubChrome()
-    const answer = await run({ id: '1', name: 'browser_scroll', args: { point: { x: 0, y: 0 } } }, h)
-    expect(answer.error?.code).toBe('input-unavailable')
-  })
-
-  it('refuses a wheel gesture on a background tab with an actionable error', async () => {
-    const h = stubChrome()
-    h.chrome.tabs.get = vi.fn(async () => ({ ...TAB, active: false }))
-    const answer = await run({ id: '1', name: 'browser_scroll', args: { point: { x: 2, y: 3 }, deltaY: 120 } }, h, fakeRuntime(h))
-    expect(answer.ok).toBe(false)
-    expect(JSON.stringify(answer)).toContain('follow_tab')
-    expect(h.runs).toHaveLength(0)
-  })
-
-  it('dispatches a wheel at the top-level viewport point', async () => {
-    const h = stubChrome()
-    await run({ id: '1', name: 'browser_scroll', args: { point: { x: 2, y: 3 }, deltaY: 120 } }, h, fakeRuntime(h))
-    const wheel = h.runs[0]!.methods.find(([method]) => method === 'Input.dispatchMouseEvent')
-    expect(wheel?.[1]).toMatchObject({ type: 'mouseWheel', x: 2, y: 3, deltaY: 120 })
   })
 
   it('keeps a synthetic paste in the content script', async () => {

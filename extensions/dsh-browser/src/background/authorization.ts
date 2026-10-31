@@ -148,19 +148,6 @@ export function approvalPromptForCall(
     }
   }
 
-  // A plain scroll only moves the viewport and stays prompt-free (existing
-  // behavior); a wheel at a point is a raw gesture into the page and is not.
-  if (call.name === 'browser_scroll' && call.args.point !== undefined) {
-    const frameId = requestedFrame(call.args)
-    const target = frames.find((frame) => frame.frameId === frameId) ?? frames.find((frame) => frame.frameId === 0)
-    return {
-      kind: 'action',
-      action: call.name,
-      summary: summarizeAction(call, locale),
-      origins: uniqueOrigins(target === undefined ? [] : [target], frames),
-      canTrust: false,
-    }
-  }
   if (!STATE_CHANGING_ACTIONS.has(call.name)) return undefined
   if (call.name === 'browser_open_tab') {
     const destination = originFromUrl(typeof call.args.url === 'string' ? call.args.url : '')
@@ -237,9 +224,6 @@ function summarizeAction(call: ToolCall, locale: UiLocale): string {
   const index = typeof call.args.index === 'number' ? call.args.index : '?'
   switch (call.name) {
     case 'browser_click': {
-      if (typeof call.args.point !== 'undefined') {
-        return localized(locale, 'Click at a page coordinate', '在页面坐标处点击')
-      }
       const target = typeof call.args.selector === 'string'
         ? `selected element (${safeInline(call.args.selector)})`
         : `element [${index}]`
@@ -296,10 +280,6 @@ function summarizeAction(call: ToolCall, locale: UiLocale): string {
       const count = Array.isArray(call.args.paths) ? call.args.paths.length : 0
       return localized(locale, `Attach ${count} local file(s) to a page field`, `向页面字段附加 ${count} 个本地文件`)
     }
-    case 'browser_scroll':
-      return call.args.point !== undefined
-        ? localized(locale, 'Send a wheel gesture into the page', '向页面发送滚轮手势')
-        : localized(locale, 'Scroll the page', '滚动页面')
     case 'browser_back': return localized(locale, 'Go back in browser history (destination domain unknown)', '返回浏览历史上一页（目标域名未知）')
     case 'browser_forward': return localized(locale, 'Go forward in browser history (destination domain unknown)', '前进到浏览历史下一页（目标域名未知）')
     case 'browser_reload': return localized(locale, 'Reload the current page', '重新加载当前页面')

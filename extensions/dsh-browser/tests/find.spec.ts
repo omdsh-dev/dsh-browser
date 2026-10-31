@@ -40,7 +40,6 @@ describe('findElements', () => {
     expect(found).toHaveLength(1)
     expect(found[0]!.label).toBe('File')
     expect(found[0]!.selector).toBe('#file-item')
-    expect(found[0]!.rect).toMatchObject({ x: 0, y: 0, width: 200, height: 40 })
     expect(found[0]!.visible).toBe(true)
   })
 
@@ -91,14 +90,13 @@ describe('findElements', () => {
 })
 
 describe('renderFound', () => {
-  it('renders index, selector, and rect for each match', () => {
+  it('renders index and selector for each match', () => {
     document.body.innerHTML = '<div id="item">File</div>'
     const found = findElements({ text: 'File', limit: 10 })
     const text = renderFound(found, { text: 'File', limit: 10 }, () => 7)
     expect(text).toContain('Found 1 element(s) matching text "File"')
     expect(text).toContain('[7] generic "File"')
     expect(text).toContain('selector=#item')
-    expect(text).toContain('rect=0,0 200x40')
   })
 
   it('explains an empty result', () => {

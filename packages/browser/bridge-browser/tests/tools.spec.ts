@@ -152,12 +152,9 @@ describe('registerBrowserTools', () => {
       properties: Record<string, unknown>
       required?: string[]
     }
-    // Targets are mutually exclusive and all optional on the schema: index,
-    // selector, and point are validated by the extension, which also supports
-    // "the currently focused element" for type/press.
+    // 元素编号和 selector 互斥，由扩展验证实际目标。
     expect(click.properties.index).toBeDefined()
     expect(click.properties.selector).toBeDefined()
-    expect(click.properties.point).toBeDefined()
     expect(click.properties.action).toBeDefined()
     expect(click.required ?? []).not.toContain('index')
   })
@@ -184,13 +181,6 @@ describe('registerBrowserTools', () => {
     const { ctx, bridge, registered } = makeHarness()
     registerBrowserTools(ctx, bridge, { toolTimeoutMs: 5_000, snapshotMaxChars: 12_000, maxInteractiveItems: 60 })
     const descriptionChars = registered.reduce((sum, { definition }) => sum + String(definition.description).length, 0)
-    // The budget tracks the tool set. The input layer added pointer, wheel, and
-    // clipboard guidance to five existing tools plus two new ones, so the
-    // ceiling grows with the cost of that guidance; the guard stays per-tool so
-    // a runaway description still fails.
-    // The wheel guidance adds one sentence to browser_scroll (the page must be
-    // active/focused, so pair it with follow_tab); raise the per-tool ceiling
-    // by that cost while keeping the total guard meaningful.
     expect(descriptionChars / registered.length).toBeLessThan(170)
     expect(descriptionChars).toBeLessThan(3_100)
   })
@@ -231,8 +221,7 @@ describe('registerBrowserTools', () => {
     const follow = byName.get('browser_follow_tab')!.parameters as { properties: Record<string, unknown> }
     expect(follow.properties.activate).toBeDefined()
     const scroll = byName.get('browser_scroll')!.parameters as { properties: Record<string, unknown>; required?: string[] }
-    expect(scroll.properties.point).toBeDefined()
-    expect(scroll.required ?? []).not.toContain('direction')
+    expect(scroll.required).toContain('direction')
   })
 
   it('validates upload paths on the host before dispatching', async () => {

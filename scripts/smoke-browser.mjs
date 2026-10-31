@@ -50,16 +50,12 @@ async function command(args) {
   assert.equal(code, 0, output)
 }
 
-const inner = `<!doctype html><body style="margin:0;overflow:hidden"><button id="inner" style="position:absolute;left:20px;top:20px;width:100px;height:50px">Inner target</button>
+const inner = `<!doctype html><body style="margin:0;min-height:1000px"><button id="inner" style="position:absolute;left:20px;top:20px;width:100px;height:50px">Inner target</button>
   <input id="upload" type="file" style="position:absolute;left:10px;top:100px;width:130px">
-  <div id="scroller" style="position:absolute;left:150px;top:20px;width:100px;height:120px;overflow:auto"><div style="height:1000px">Scroll target</div></div>
+  <input id="input" value="abcd" style="position:absolute;left:150px;top:20px;width:100px">
   <script>
-    window.innerClicks=0;window.pageMarker='frame-world';window.pointerEvents=[];
+    window.innerClicks=0;window.pageMarker='frame-world';
     document.querySelector('#inner').addEventListener('click',()=>window.innerClicks++);
-    for(const type of ['pointerdown','pointerup','pointermove','click','contextmenu','wheel']) document.addEventListener(type,event=>{
-      window.pointerEvents.push({type,x:event.clientX,y:event.clientY,button:event.button,shift:event.shiftKey,trusted:event.isTrusted});
-      if(type==='contextmenu') event.preventDefault();
-    });
   </script></body>`
 const childServer = createServer((request, response) => {
   response.setHeader('content-type', 'text/html')
@@ -234,6 +230,39 @@ try {
   }
   results.push('caret insertion preserves selections in native and contenteditable fields')
 
+  succeed(await tool('browser_clipboard', { action: 'write', text: 'Plain clipboard text', html: '<b>Rich clipboard text</b>' }))
+  await page.locator('#text').evaluate(input => { input.value = '' })
+  succeed(await tool('browser_clipboard', { action: 'paste', method: 'system', selector: '#text' }))
+  assert.equal(await page.locator('#text').inputValue(), 'Plain clipboard text')
+  await page.locator('#editor').evaluate(editor => { editor.textContent = '' })
+  succeed(await tool('browser_clipboard', { action: 'paste', method: 'system', selector: '#editor' }))
+  assert.equal(await page.locator('#editor b').textContent(), 'Rich clipboard text')
+  succeed(await tool('browser_clipboard', { action: 'write', html: '<b>HTML &amp; &#20013;&#25991;</b>' }))
+  await page.locator('#text').evaluate(input => { input.value = '' })
+  succeed(await tool('browser_clipboard', { action: 'paste', method: 'system', selector: '#text' }))
+  assert.equal(await page.locator('#text').inputValue(), 'HTML & 中文')
+  results.push('system clipboard preserves independent plain-text and HTML formats and decodes HTML entities')
+
+  await page.locator('#editor').evaluate(editor => {
+    editor.addEventListener('paste', event => {
+      window.eventPaste = {
+        text: event.clipboardData.getData('text/plain'), html: event.clipboardData.getData('text/html'),
+        bubbles: event.bubbles, cancelable: event.cancelable,
+      }
+      event.preventDefault()
+    })
+  })
+  succeed(await tool('browser_clipboard', { action: 'paste', selector: '#editor', text: 'Event text', html: '<b onclick="alert(1)">Event HTML</b><script>alert(2)</script>' }))
+  assert.deepEqual(await page.evaluate(() => window.eventPaste), {
+    text: 'Event text', html: '<b>Event HTML</b>', bubbles: true, cancelable: true,
+  })
+  succeed(await tool('browser_clipboard', { action: 'paste', selector: '#editor', text: 'Plain event' }))
+  assert.equal(await page.evaluate(() => window.eventPaste.html), '')
+  await page.locator('#text').evaluate(input => { input.value = '' })
+  succeed(await tool('browser_clipboard', { action: 'paste', selector: '#text', text: 'Unhandled event' }))
+  assert.equal(await page.locator('#text').inputValue(), 'Unhandled event')
+  results.push('native clipboard events deliver sanitized HTML and plain text, including ordinary input fields')
+
   const frameUrls = {
     same: `${origin}/inner`, cross: `${crossOrigin}/inner`, crossSite: `${crossSiteOrigin}/inner`,
     nestedSame: `${crossSiteOrigin}/inner?nested-same`, nestedCross: `${origin}/inner?nested-cross`,
@@ -251,60 +280,22 @@ try {
   const beforeEvents = await page.evaluate(() => window.events.length)
   for (const [kind, frame] of Object.entries(frameIds)) {
     const document = page.frame({ url: frameUrls[kind] })
-    succeed(await tool('browser_click', { frame, point: { x: 40, y: 40 } }))
+    succeed(await tool('browser_snapshot', { frame }))
+    const index = Number(await document.locator('#inner').getAttribute('data-dsh-el'))
+    assert.ok(Number.isSafeInteger(index) && index > 0, kind)
+    succeed(await tool('browser_click', { frame, index }))
     assert.equal(await document.evaluate(() => window.innerClicks), 1, kind)
-    const clicked = await document.evaluate(() => window.pointerEvents.find(event => event.type === 'click'))
-    assert.ok(clicked.trusted && Math.abs(clicked.x - 40) <= 1 && Math.abs(clicked.y - 40) <= 1, JSON.stringify({ kind, clicked }))
-    succeed(await tool('browser_click', { frame, selector: '#inner', trusted: true }))
+    succeed(await tool('browser_click', { frame, selector: '#inner' }))
     assert.equal(await document.evaluate(() => window.innerClicks), 2, kind)
-    await document.evaluate(() => { window.pointerEvents = [] })
-    succeed(await tool('browser_click', { frame, action: 'drag', point: { x: 40, y: 40 }, to: { x: 100, y: 60 }, steps: 4 }))
-    const events = await document.evaluate(() => window.pointerEvents)
-    for (const [type, x, y] of [['pointerdown', 40, 40], ['pointerup', 100, 60]]) {
-      const event = events.find(event => event.type === type)
-      assert.ok(event?.trusted && Math.abs(event.x - x) <= 1 && Math.abs(event.y - y) <= 1, JSON.stringify({ kind, type, events }))
-    }
-    assert.ok(events.some(event => event.type === 'pointermove' && event.trusted), kind)
-    succeed(await tool('browser_scroll', { frame, point: { x: 180, y: 50 }, deltaY: 100 }))
-    await waitFor(() => document.locator('#scroller').evaluate(element => element.scrollTop > 0), `${kind} wheel scroll`)
-    assert.equal(await document.evaluate(() => window.pointerEvents.find(event => event.type === 'wheel')?.trusted), true, kind)
+    succeed(await tool('browser_type', { frame, selector: '#input', text: kind, replace: true }))
+    assert.equal(await document.locator('#input').inputValue(), kind)
+    succeed(await tool('browser_scroll', { frame, direction: 'down', amount: 100 }))
+    await waitFor(() => document.evaluate(() => scrollY > 0), `${kind} page scroll`)
+    succeed(await tool('browser_scroll', { frame, direction: 'top' }))
+    await waitFor(() => document.evaluate(() => scrollY === 0), `${kind} scroll to top`)
   }
   assert.equal(await page.evaluate(() => window.events.length), beforeEvents)
-  results.push('trusted clicks, selector clicks, drags, and wheel scrolling hit all five frame types without clicking the outer page')
-
-  for (const transform of ['scale(.9) rotate(7deg)', 'perspective(500px) rotateY(25deg)', 'scale(.25) rotate(7deg)']) {
-    await page.locator('#same, #cross, #crossSite, #nested').evaluateAll((elements, transform) => {
-      document.body.style.minHeight = '1400px';
-      for (const element of elements) Object.assign(element.style, { border: '7px solid', padding: '3px', transform, transformOrigin: '0 0' });
-      window.scrollTo(0, 100);
-    }, transform)
-    assert.equal(await page.evaluate(() => scrollY), 100)
-    for (const [kind, frame] of Object.entries(frameIds)) {
-      const document = page.frame({ url: frameUrls[kind] })
-      await document.evaluate(() => { window.pointerEvents = [] })
-      succeed(await tool('browser_click', { frame, point: { x: 40, y: 40 } }))
-      const clicked = await document.evaluate(() => window.pointerEvents.find(event => event.type === 'click'))
-      assert.ok(clicked?.trusted && Math.abs(clicked.x - 40) <= 1 && Math.abs(clicked.y - 40) <= 1, JSON.stringify({ kind, transform, clicked }))
-      await document.locator('#scroller').evaluate(element => { element.scrollTop = 0 })
-      succeed(await tool('browser_scroll', { frame, point: { x: 180, y: 50 }, deltaY: 100 }))
-      await waitFor(() => document.locator('#scroller').evaluate(element => element.scrollTop > 0), `${kind} transformed wheel scroll`)
-    }
-  }
-  await page.evaluate(() => window.scrollTo(0, 0))
-  results.push('frame coordinates survive borders, padding, page scrolling, nested transforms, rotation, scaling, and perspective')
-
-  const pointerFrame = page.frame({ url: frameUrls.crossSite })
-  await pointerFrame.evaluate(() => { window.pointerEvents = [] })
-  for (const [action, point] of [['down', { x: 40, y: 40 }], ['move', { x: 80, y: 50 }], ['up', { x: 100, y: 60 }]]) {
-    succeed(await tool('browser_click', { frame: frameIds.crossSite, action, point, modifiers: ['Shift'] }))
-  }
-  const heldEvents = await pointerFrame.evaluate(() => window.pointerEvents)
-  for (const type of ['pointerdown', 'pointermove', 'pointerup']) {
-    assert.ok(heldEvents.some(event => event.type === type && event.trusted && event.shift), JSON.stringify(heldEvents))
-  }
-  succeed(await tool('browser_click', { frame: frameIds.crossSite, point: { x: 40, y: 40 }, button: 'right', modifiers: ['Shift'] }))
-  assert.ok(await pointerFrame.evaluate(() => window.pointerEvents.some(event => event.type === 'contextmenu' && event.trusted && event.button === 2 && event.shift)))
-  results.push('out-of-process frames preserve pointer state across calls and receive trusted modifier/right-click gestures')
+  results.push('element indices, selectors, text input, and page scrolling work in all five frame types without clicking the outer page')
 
   const upload = join(directory, 'upload.txt')
   await writeFile(upload, 'Browser upload regression fixture')

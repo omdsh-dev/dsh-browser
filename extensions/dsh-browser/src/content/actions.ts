@@ -338,8 +338,8 @@ async function clickAction(args: Record<string, unknown>, ctx: ActionContext): P
   const action = args.action
   if (action !== undefined && action !== 'click' && action !== 'dblclick') {
     throw new ActionError(
-      'input-unavailable',
-      `Pointer action "${String(action)}" needs the trusted input channel, which the browser routes through its debugger.`,
+      'bad-args',
+      'action must be click or dblclick.',
     )
   }
   const el = resolveActionTarget(args, ctx.ids)

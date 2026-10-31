@@ -11,12 +11,12 @@ dsh 的**浏览器操作端**：让模型直接读取并操作你在浏览器里
 
 | 能力 | 动作 | 说明 |
 |---|---|---|
-| 读取页面 | `browser_snapshot` | 标题/URL/正文/编号交互清单/表单字段（敏感值掩码）；`delta: true` 只返回变化，`frame` 单读 iframe，`query` 定位任意元素并给出选择器与坐标 |
+| 读取页面 | `browser_snapshot` | 标题/URL/正文/编号交互清单/表单字段（敏感值掩码）；`delta: true` 只返回变化，`frame` 单读 iframe，`query` 定位任意元素并给出选择器 |
 | 截取可视区域 | `browser_screenshot` | 捕获可见像素，不遮盖字段；除非启用了完全控制，否则需要截图审批 |
-| 指针 | `browser_click` | 按编号或选择器点击/双击/悬停/按下/抬起/拖拽，或按 frame 内坐标操作 |
+| 点击 | `browser_click` | 按编号或选择器点击、双击；支持鼠标按键和修饰键 |
 | 文本 | `browser_type` | 输入文本，`replace` 清空重填；`mode` 选择光标插入或逐字符按键 |
 | 按键 | `browser_press` | 单键与组合键，可跨调用按住修饰键 |
-| 滚动 | `browser_scroll` | 视口滚动，或在坐标处发送真实滚轮手势 |
+| 滚动 | `browser_scroll` | 向上、向下滚动页面或指定 iframe，或滚动到顶部、底部 |
 | 剪贴板 / 文件 | `browser_clipboard` / `browser_upload` | 写入或粘贴文本与富文本；把本机文件附加到 file input |
 | 导航 | `browser_navigate` / `browser_open_tab` / `browser_back` / `browser_forward` / `browser_reload` | 受控标签页内跳转，或新开标签页并跟随 |
 | 列出标签页 | `browser_list_tabs` | 列出可访问标签页的稳定 ID、标题、URL 和活动/受控状态 |
@@ -29,8 +29,6 @@ dsh 的**浏览器操作端**：让模型直接读取并操作你在浏览器里
 | 网络抓包 | `browser_devtools_network` / `browser_devtools_list_requests` / `browser_devtools_get_request` / `browser_devtools_request_body` | 高权限：已捕获请求列表、单条详情与正文（凭据类请求头默认脱敏） |
 | 图片对话 | `session.prompt` / `session.attachment` | 按宿主能力启用图片选择、纯图片发送和持久历史预览 |
 | 引用你划选的内容 | 侧栏输入框 | 你在页面里选中的文字会变成输入框里的引用，随下一条消息一起发送 |
-
-Chrome 的真实指针和滚轮输入支持跨源、多层嵌套以及独立渲染进程中的 iframe。坐标以所选 frame 的视口为基准，浏览器提供的位置数据涵盖滚动、边框、内边距、缩放、旋转和透视变换。
 
 ## 架构
 

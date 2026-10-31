@@ -3,5 +3,5 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write dsh-browser/packages/browser/bridge-browser/README.md
 
-README.md: 5a8f73dab1c451dba2171c4b9cf69c5780f4cf4e
-README.zh.md: 9f9b5e20c8592a6d3586417aba84c6e21871f875
+README.md: ec11a0cfec3e58d07dcc8e8fb52870049d38d4b0
+README.zh.md: 3260c0550dcf3aec6f2d0b046608704df741e05d

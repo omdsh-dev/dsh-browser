@@ -11,12 +11,12 @@ Browser pages are rendered as structured text with a numbered interactive-elemen
 
 | Capability | Action | Notes |
 |---|---|---|
-| Read page | `browser_snapshot` | Title/URL/main text/numbered inventory/form fields (sensitive values masked); `delta: true` returns only changes, `frame` reads one iframe, `query` locates any element with selector and rect |
+| Read page | `browser_snapshot` | Title/URL/main text/numbered inventory/form fields (sensitive values masked); `delta: true` returns only changes, `frame` reads one iframe, `query` locates any element and returns its selector |
 | Capture viewport | `browser_screenshot` | Captures visible pixels without masking; requires screenshot approval unless unrestricted control is enabled |
-| Pointer | `browser_click` | Click/double-click/hover/press/release/drag by index or selector, or at frame-local coordinates |
+| Click | `browser_click` | Click or double-click by index or selector; supports mouse buttons and modifiers |
 | Text | `browser_type` | Type text; `replace` clears first; `mode` chooses insertion or per-character keys |
 | Keys | `browser_press` | Keys and chords, including held modifiers across calls |
-| Scroll | `browser_scroll` | Viewport scrolling, or a real wheel gesture at a point |
+| Scroll | `browser_scroll` | Scroll the page or selected iframe up, down, to the top, or to the bottom |
 | Clipboard / files | `browser_clipboard` / `browser_upload` | Write or paste text and rich HTML; attach local files to a file input |
 | Navigate | `browser_navigate` / `browser_open_tab` / `browser_back` / `browser_forward` / `browser_reload` | Navigation inside the controlled tab, or open a URL in a new tab and follow it |
 | List tabs | `browser_list_tabs` | List accessible tabs with stable IDs, titles, URLs, and active/controlled state |
@@ -29,8 +29,6 @@ Browser pages are rendered as structured text with a numbered interactive-elemen
 | Capture network | `browser_devtools_network` / `browser_devtools_list_requests` / `browser_devtools_get_request` / `browser_devtools_request_body` | High privilege: captured request list, per-request detail, and bodies (credential headers redacted by default) |
 | Chat with images | `session.prompt` / `session.attachment` | Host-gated image selection, image-only sends, and durable history previews |
 | Quote what you highlight | side panel composer | The text you select in the page becomes a quote in the composer and rides along with your next message |
-
-Chrome's trusted pointer and wheel input supports cross-origin and nested iframes, including frames in separate renderer processes. Points are relative to the selected frame's viewport; browser-provided geometry accounts for scrolling, borders, padding, scaling, rotation, and perspective transforms.
 
 ## Architecture
 

@@ -58,19 +58,6 @@ describe('selector targets', () => {
     expect(result.text).toContain('#comment')
   })
 
-  it('pastes into a plain input by selector and falls back to a caret insertion', async () => {
-    document.body.innerHTML = '<input id="comment">'
-    const input = document.getElementById('comment') as HTMLInputElement
-    const result = await runAction(
-      'browser_clipboard',
-      { action: 'paste', selector: '#comment', text: 'pasted' },
-      { ids: emptyIds(), budget: BUDGET },
-    )
-    expect(input.value).toBe('pasted')
-    expect(result.text).toContain('#comment')
-    expect(result.text).toContain('inserted at the caret')
-  })
-
   it('rejects an invalid selector with a stable code', async () => {
     await expect(runAction('browser_click', { selector: '##bad' }, { ids: emptyIds(), budget: BUDGET }))
       .rejects.toMatchObject({ code: 'bad-args' })

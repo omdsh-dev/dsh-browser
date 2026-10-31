@@ -1,12 +1,10 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import type { CdpClient } from '../src/background/debugger-session.ts'
 import { InputState } from '../src/background/input-state.ts'
 import {
   InputError,
   dispatchKey,
-  dispatchPointer,
-  dispatchWheel,
   editingCommandFor,
   insertTextAtCaret,
   pasteShortcutModifier,
@@ -33,58 +31,6 @@ function fakeClient(handlers: Record<string, (params: Record<string, unknown>) =
     },
   }
 }
-
-describe('dispatchPointer', () => {
-  it('clicks a point with a real press/release pair', async () => {
-    const { client, calls } = fakeClient()
-    const state = new InputState()
-    await dispatchPointer(client, state, { action: 'click', point: { x: 10.4, y: 20.6 } })
-    expect(calls.map((call) => call.method)).toEqual(['Input.dispatchMouseEvent', 'Input.dispatchMouseEvent'])
-    expect(calls[0]!.params).toMatchObject({ type: 'mousePressed', x: 10.4, y: 20.6, button: 'left', buttons: 1, clickCount: 1 })
-    expect(calls[1]!.params).toMatchObject({ type: 'mouseReleased', buttons: 0 })
-    expect(state.buttonsMask()).toBe(0)
-  })
-
-  it('emits increasing click counts for a double click', async () => {
-    const { client, calls } = fakeClient()
-    await dispatchPointer(client, new InputState(), { action: 'dblclick', point: { x: 0, y: 0 } })
-    expect(calls.map((call) => call.params.clickCount)).toEqual([1, 1, 2, 2])
-  })
-
-  it('drags through every interpolation step and releases at the destination', async () => {
-    const { client, calls } = fakeClient()
-    await dispatchPointer(client, new InputState(), {
-      action: 'drag',
-      point: { x: 0, y: 0 },
-      to: { x: 100, y: 50 },
-      steps: 2,
-    })
-    expect(calls.map((call) => call.params.type)).toEqual([
-      'mouseMoved',
-      'mousePressed',
-      'mouseMoved',
-      'mouseMoved',
-      'mouseReleased',
-    ])
-    expect(calls[3]!.params).toMatchObject({ x: 100, y: 50 })
-    expect(calls[4]!.params).toMatchObject({ x: 100, y: 50, buttons: 0 })
-  })
-
-  it('carries held modifiers and pressed buttons', async () => {
-    const { client, calls } = fakeClient()
-    const state = new InputState()
-    state.setModifier('Shift', true)
-    await dispatchPointer(client, state, { action: 'click', point: { x: 5, y: 5 }, button: 'right' })
-    expect(calls[0]!.params).toMatchObject({ modifiers: 8, button: 'right', buttons: 2 })
-    expect(calls[1]!.params).toMatchObject({ modifiers: 8, button: 'right', buttons: 0 })
-  })
-
-  it('rejects a drag without a destination', async () => {
-    const { client } = fakeClient()
-    await expect(dispatchPointer(client, new InputState(), { action: 'drag', point: { x: 0, y: 0 } }))
-      .rejects.toThrow(/destination/)
-  })
-})
 
 describe('editingCommandFor', () => {
   it('names the macOS editing commands a CDP key event does not reach', () => {
@@ -172,14 +118,6 @@ describe('insertTextAtCaret', () => {
   })
 })
 
-describe('dispatchWheel', () => {
-  it('sends a wheel event with deltas at the point', async () => {
-    const { client, calls } = fakeClient()
-    await dispatchWheel(client, new InputState(), { point: { x: 3, y: 4 }, deltaX: 0, deltaY: 120 })
-    expect(calls[0]!.params).toMatchObject({ type: 'mouseWheel', x: 3, y: 4, deltaX: 0, deltaY: 120 })
-  })
-})
-
 describe('paste shortcut', () => {
   it('chooses Meta on macOS and Control elsewhere', () => {
     expect(pasteShortcutModifier('Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)')).toBe('Meta')
@@ -210,13 +148,6 @@ describe('withFocusEmulation', () => {
     expect(calls.at(-1)!.params.enabled).toBe(false)
   })
 
-  it('runs the sequence when focus emulation is unavailable', async () => {
-    const send = vi.fn()
-      .mockRejectedValueOnce(new Error('method not found'))
-      .mockResolvedValueOnce({})
-    const client = { send } as unknown as CdpClient
-    await expect(withFocusEmulation(client, async () => 'ok')).resolves.toBe('ok')
-  })
 })
 
 describe('setInputFiles', () => {

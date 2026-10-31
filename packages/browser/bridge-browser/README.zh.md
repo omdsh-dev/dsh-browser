@@ -4,7 +4,7 @@
 
 dsh 的**浏览器操作桥**挂载经过 token 认证的 WebSocket 通道（`/ext/bridge`）供浏览器扩展连接，把扩展调用投影到 DSH Typert Remotes，跟随 Session 与 Remote Event 流，并注册用于读取和操作受控标签页、截图、开发者工具的工具集。浏览器保留登录状态，侧栏提供对话界面。
 
-页面快照包含结构化文本、编号控件和遮盖敏感值的表单字段。操作支持元素编号、选择器和坐标。截图和对话图片使用 DSH 持久附件服务；宿主挂载该服务时，延迟创建的会话会声明图片限制。
+页面快照包含结构化文本、编号控件和遮盖敏感值的表单字段。操作通过元素编号或选择器定位。截图和对话图片使用 DSH 持久附件服务；宿主挂载该服务时，延迟创建的会话会声明图片限制。
 
 
 ## 配置
@@ -92,15 +92,15 @@ npx @deepseek-ai/dsh@0.2.1-rc.5 web
 
 | 工具 | 用途 |
 |---|---|
-| `browser_snapshot` | 结构化文本快照（标题/URL/正文/清单/表单）；`delta: true` 只返回变化，`frame` 单读一个 iframe，`query` 按文本/选择器/角色定位元素并给出选择器与坐标。 |
-| `browser_click` | 指针操作：按编号或选择器点击/双击/悬停/按下/抬起/拖拽，或按 frame 内坐标（`point`）操作；`trusted: true` 要求真实鼠标事件。 |
+| `browser_snapshot` | 结构化文本快照（标题/URL/正文/清单/表单）；`delta: true` 只返回变化，`frame` 单读一个 iframe，`query` 按文本/选择器/角色定位元素并给出选择器。 |
+| `browser_click` | 按编号或选择器点击、双击；支持鼠标按键和修饰键。 |
 | `browser_type` | 按编号/选择器或向当前焦点输入文本；`replace` 先选中内容，`mode` 选择光标插入或逐字符按键。 |
 | `browser_press` | 单键或组合键（`modifiers`），`action: down/up` 跨调用按住，`repeat` 重复。 |
 | `browser_clipboard` / `browser_upload` | 写入/粘贴文本与富文本；把本机文件附加到 file input（系统粘贴与上传在 Chrome 可用）。 |
-| `browser_scroll` / `browser_navigate` / `browser_open_tab` / `browser_back` / `browser_forward` / `browser_reload` | 页面移动；`browser_scroll` 带 `point` 时发送真实滚轮手势。 |
+| `browser_scroll` / `browser_navigate` / `browser_open_tab` / `browser_back` / `browser_forward` / `browser_reload` | 页面滚动与导航；滚动时可用 `frame` 指定 iframe。 |
 | `browser_get_text` / `browser_wait` | 读区域文本 / 稳定检测。 |
 
-输入投递：元素寻址与纯文本留在内容脚本，不需要调试器。坐标点击、指针手势、滚轮手势、真实组合键、光标插入、系统粘贴、文件上传走 Chrome 的调试器输入通道；平台没有该通道时，要么降级为合成事件（结果标注 `(synthetic)`），要么以 `input-unavailable` 失败。输入不会激活标签页、聚焦窗口或移动系统鼠标；`browser_follow_tab { activate: true }` 是唯一显式切前台的方式。滚轮手势要求页面是活动标签页且窗口聚焦（后台页可能被冻结，守卫会立即返回带 `follow_tab {activate:true}` 提示的错误）；截图同样要求活动标签页与聚焦窗口。
+点击、文本输入和滚动操作在指定文档中执行，支持跨域 iframe。Chrome 通过调试器执行原生键盘事件、光标位置插入、系统粘贴和文件上传。截图要求受控标签页处于活动状态且窗口聚焦，可以使用 `browser_follow_tab { activate: true }` 将页面切到前台。
 
 ### 开发者工具（高权限）
 

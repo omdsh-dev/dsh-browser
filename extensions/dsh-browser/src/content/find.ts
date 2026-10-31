@@ -3,8 +3,8 @@
  *
  * The snapshot inventory only lists semantically interactive elements, so rich
  * editors, canvas apps and SVG surfaces keep their real controls out of reach.
- * This module locates any element by text, selector or role and reports the
- * geometry a trusted pointer needs, without knowing anything about the app.
+ * This module locates any element by text, selector or role and returns its
+ * selector for page actions.
  *
  * The locator is deliberately app-agnostic: it treats every element alike and
  * never keys on a domain, component class or editor implementation.
@@ -23,19 +23,10 @@ export interface LocatorQuery {
   limit?: number
 }
 
-/** Viewport-relative geometry in CSS pixels (the frame's own viewport). */
-export interface ElementGeometry {
-  x: number
-  y: number
-  width: number
-  height: number
-}
-
 /** One located element with everything the model needs to act on it. */
 export interface FoundElement {
   element: Element
   selector: string
-  rect: ElementGeometry
   visible: boolean
   editable: boolean
   focusable: boolean
@@ -294,11 +285,9 @@ export function findElements(query: LocatorQuery): FoundElement[] {
   for (const el of dedupeNested(candidates(query))) {
     const visible = isRendered(el)
     if (!visible && query.includeHidden !== true) continue
-    const rect = el.getBoundingClientRect()
     found.push({
       element: el,
       selector: uniqueSelectorFor(el),
-      rect: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
       visible,
       editable: isEditableElement(el),
       focusable: isFocusableElement(el),
@@ -332,9 +321,8 @@ export function renderFound(found: FoundElement[], query: LocatorQuery, indexOf:
       item.focusable ? 'focusable' : undefined,
     ].filter((value) => value !== undefined).join('/')
     const label = item.label.length > LABEL_MAX_CHARS ? `${item.label.slice(0, LABEL_MAX_CHARS - 1)}…` : item.label
-    const rect = `${Math.round(item.rect.x)},${Math.round(item.rect.y)} ${Math.round(item.rect.width)}x${Math.round(item.rect.height)}`
-    lines.push(`  ${identity} ${item.role} "${label}" · selector=${item.selector} · rect=${rect}${state === '' ? '' : ` · ${state}`}`)
+    lines.push(`  ${identity} ${item.role} "${label}" · selector=${item.selector}${state === '' ? '' : ` · ${state}`}`)
   }
-  lines.push('Click by index when one is present, otherwise by selector; use rect center with browser_click { point } for a raw mouse click.')
+  lines.push('Click by index when one is present, otherwise by selector.')
   return lines.join('\n')
 }

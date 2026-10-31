@@ -8,7 +8,7 @@ Connect [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) to t
 
 `dsh` is DeepSeek AI's open-source, plugin-based agent harness. This repository provides a companion browser bridge plugin and Chrome/Firefox MV3 extension as one standalone pnpm workspace.
 
-Pages become structured text with a numbered inventory of interactive elements. Tools can address elements by number, selector, or coordinates; `browser_screenshot` captures the controlled tab's viewport after approval. The side panel also accepts PNG, JPEG, WebP, and GIF attachments when the host advertises image support.
+Pages become structured text with a numbered inventory of interactive elements. Tools address elements by number or selector; `browser_screenshot` captures the controlled tab's viewport after approval. The side panel also accepts PNG, JPEG, WebP, and GIF attachments when the host advertises image support.
 
 > [!IMPORTANT]
 > The workspace targets the latest public dsh release, currently pinned to 0.2.1-rc.5. Older DSH releases are not supported.
@@ -49,11 +49,11 @@ The paired Playwright / extension duration ratio was **1.24** (95% CI **1.16–1
 
 | Capability | Tool | Notes |
 |---|---|---|
-| Read page | `browser_snapshot` | Structured text snapshot: title, URL, main text, numbered controls, and masked form fields; `delta: true` returns only changes, `frame` reads one iframe, and `query` locates any element by text/selector/role with its selector and rect |
-| Pointer | `browser_click` | Click, double-click, hover, press, release, or drag by index or selector; canvas targets without an identity accept frame-local `point` coordinates |
+| Read page | `browser_snapshot` | Structured text snapshot: title, URL, main text, numbered controls, and masked form fields; `delta: true` returns only changes, `frame` reads one iframe, and `query` locates any element by text/selector/role and returns its selector |
+| Click | `browser_click` | Click or double-click by index or selector; supports mouse buttons and modifiers |
 | Text | `browser_type` | React/Vue-compatible input; `replace` clears the field first, and `mode` selects caret insertion or per-character key events |
 | Press keys | `browser_press` | Single keys or chords (`modifiers`); `action: down/up` holds a key across calls and `repeat` repeats it |
-| Scroll | `browser_scroll` | Viewport scrolling; with `point` it sends a real wheel gesture at those coordinates (canvas zoom/pan) |
+| Scroll | `browser_scroll` | Scroll the page or selected iframe up, down, to the top, or to the bottom |
 | Clipboard | `browser_clipboard` | `write` puts text/HTML on the system clipboard; `paste` delivers it as a paste event or a real platform shortcut |
 | Files | `browser_upload` | Attach local files to an `input[type=file]` (Chrome) |
 | Navigate | `browser_navigate` / `browser_open_tab` / `browser_back` / `browser_forward` / `browser_reload` | Navigation inside the controlled tab, or open a URL in a new tab and follow it (`active:false` keeps the current tab in front) |
@@ -65,7 +65,7 @@ The paired Playwright / extension duration ratio was **1.24** (95% CI **1.16–1
 | Send images | `session.prompt` / `session.attachment` | Host-capability-gated image drafts, image-only prompts, and durable history previews |
 | Quote a selection | side panel composer | Text you highlight in the page appears in the composer and is sent with your next message as fenced, attributed page content |
 
-The input layer is a set of general primitives, not per-app handling: keyboard, pointer, text, clipboard, and files all address a target by element identity or coordinates, so any rich editor, canvas, code editor, or drag surface uses the same parameters. Input runs in the background by default — no tab activation, no window focus, no system pointer movement. When real events matter (`isTrusted`, browser default actions) the Chrome build delivers them through the debugger; Firefox degrades to synthetic events and marks the result `(synthetic)`. Wheel gestures and screenshots are the exceptions: a wheel needs the page to be the active tab in a focused window (Chrome freezes background pages, so the tool fails fast with a `follow_tab {activate:true}` hint), and a screenshot needs the same focus or it may return an older frame.
+Clicks, text entry, and scrolling run in the selected document, including cross-origin iframes. Chrome uses its debugger for native keyboard events, caret insertion, system paste, and file uploads. Screenshots require an active tab in a focused window; `browser_follow_tab { activate: true }` brings the controlled page to the front.
 
 ## Repository layout
 
@@ -183,7 +183,7 @@ Notes:
 
 `check:runtime` checks the resolved DSH dependencies and lockfile; `test:smoke` starts the real web host in a temporary DSH home and verifies the bridge and session reads after a restart, without model credentials. CI runs these checks after a clean installation.
 
-After building, run `pnpm test:browser` with a Playwright Chromium installation, or set `CHROMIUM_PATH` to a Chromium executable that supports loading unpacked extensions. This starts real DSH and Chromium instances to verify sharing controls, developer-tools consent, input, iframe uploads and targeting, and CSS edits. Site isolation is enabled and verified for cross-site frames; pointer and wheel checks cover nested frames, borders, padding, scrolling, scaling, rotation, and perspective. It needs no model credentials and saves results under `.artifacts/browser-smoke/`.
+After building, run `pnpm test:browser` with a Playwright Chromium installation, or set `CHROMIUM_PATH` to a Chromium executable that supports loading unpacked extensions. This starts real DSH and Chromium instances to verify sharing controls, developer-tools consent, input, iframe uploads and targeting, and CSS edits. Site isolation is enabled and verified for cross-site frames; element clicks, input, and scrolling cover same-origin, cross-origin, and nested frames. It needs no model credentials and saves results under `.artifacts/browser-smoke/`.
 
 If you encounter `cache.hydratePrepared is not a function`, update the repository, rerun `pnpm install --frozen-lockfile` and `pnpm run build`, then restart `pnpm start`. Session data and the global package cache can be kept.
 

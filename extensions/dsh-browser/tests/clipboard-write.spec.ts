@@ -15,22 +15,15 @@ function stubChrome(stub: ChromeStub): void {
   ;(globalThis as { chrome?: ChromeStub }).chrome = stub
 }
 
-function stubExecCommand(result: boolean): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(() => result)
-  Object.defineProperty(document, 'execCommand', { configurable: true, value: fn })
-  return fn
-}
-
 afterEach(() => {
   delete (globalThis as { chrome?: ChromeStub }).chrome
-  delete (document as unknown as { execCommand?: unknown }).execCommand
   vi.restoreAllMocks()
 })
 
 describe('writeClipboard', () => {
   it('creates the offscreen document once and sends the payload', async () => {
     const createDocument = vi.fn(async () => undefined)
-    const sendMessage = vi.fn(async () => ({ ok: true }))
+    const sendMessage = vi.fn(async () => ({ ok: true, outcome: { rich: true, plainDerived: false, plainText: 'hello' } }))
     stubChrome({ offscreen: { hasDocument: async () => false, createDocument }, runtime: { sendMessage } })
     const outcome = await writeClipboard({ text: 'hello', html: '<b>hello</b>' })
     expect(createDocument).toHaveBeenCalledWith({
@@ -64,7 +57,7 @@ describe('writeClipboard', () => {
     const createDocument = vi.fn(async () => undefined)
     stubChrome({
       offscreen: { hasDocument: async () => true, createDocument },
-      runtime: { sendMessage: async () => ({ ok: true }) },
+      runtime: { sendMessage: async () => ({ ok: true, outcome: { rich: false, plainDerived: false, plainText: 'hello' } }) },
     })
     await writeClipboard({ text: 'hello' })
     expect(createDocument).not.toHaveBeenCalled()
@@ -76,22 +69,6 @@ describe('writeClipboard', () => {
       runtime: { sendMessage: async () => ({ ok: false, error: 'clipboard denied' }) },
     })
     await expect(writeClipboard({ text: 'x' })).rejects.toThrow(/clipboard denied/)
-  })
-
-  it('fails with input-unavailable when the platform cannot copy', async () => {
-    stubChrome({})
-    stubExecCommand(false)
-    await expect(writeClipboard({ text: 'x' })).rejects.toMatchObject({ code: 'input-unavailable' })
-  })
-
-  it('copies through the event-page document when no offscreen API exists', async () => {
-    stubChrome({})
-    const execCommand = stubExecCommand(true)
-    const outcome = await writeClipboard({ text: 'fallback', html: '<i>fallback</i>' })
-    expect(execCommand).toHaveBeenCalledWith('copy')
-    expect(document.body.textContent).not.toContain('fallback')
-    // execCommand copies the selected DOM, so the plain flavor is derived.
-    expect(outcome).toMatchObject({ rich: true, plainDerived: true, plainText: 'fallback' })
   })
 
   it('rejects an empty payload', async () => {

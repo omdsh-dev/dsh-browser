@@ -7,6 +7,17 @@
  * @module
  */
 
+import DOMPurify from 'dompurify'
+
+/** 保留粘贴内容的排版，移除可执行内容和表单控件。 */
+export function sanitizeClipboardHtml(html: string): string {
+  return DOMPurify.sanitize(html, {
+    USE_PROFILES: { html: true },
+    FORBID_TAGS: ['style', 'form', 'input', 'button', 'select', 'textarea', 'template', 'noscript'],
+    FORBID_ATTR: ['srcdoc', 'formaction'],
+  })
+}
+
 /** Payload for one clipboard write. */
 export interface ClipboardWritePayload {
   text: string

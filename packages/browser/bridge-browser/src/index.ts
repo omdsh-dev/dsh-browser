@@ -181,10 +181,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const gateway = ctx.get('typertGateway') as unknown as GatewayCandidate | undefined
   const connection = ctx.get('connection') as unknown as HostConnectionLike | undefined
   if (gateway === undefined || !hasRemoteWireStream(gateway)) {
-    throw new Error('bridge-browser: dsh 0.2.1-rc.2 or a compatible newer runtime is required (Gateway wireStream unavailable)')
+    throw new Error('bridge-browser: dsh 0.2.1-rc.5 is required (Gateway wireStream unavailable)')
   }
   if (connection === undefined || typeof connection.createPeer !== 'function') {
-    throw new Error('bridge-browser: dsh 0.2.1-rc.2 or a compatible newer runtime is required (connection.createPeer unavailable)')
+    throw new Error('bridge-browser: dsh 0.2.1-rc.5 is required (connection.createPeer unavailable)')
   }
   const tokenRes = await resolveToken(resolved.token)
   mountBridge(ctx, resolved, tokenRes, createRemoteHostApi(gateway, connection))
@@ -371,7 +371,7 @@ function mountBridge(
         + '(text-only; numbered items are the click/type targets), unless the current turn already includes a plugin-provided '
         + 'followed-page browser_snapshot. Reuse that injected snapshot and its indices directly. Never assume page content you have not snapshotted. '
         + 'When visual appearance matters, call browser_screenshot to capture the controlled tab viewport as an image. '
-        + 'Use browser_snapshot { query } to locate controls that have no semantic role; browser_click accepts pointer gestures and coordinates, '
+        + 'Use browser_snapshot { query } to locate controls by text or selector; browser_click targets elements by index or selector, '
         + 'browser_press sends chords and held keys, and browser_clipboard pastes rich content into editors.'
         + (devToolsDisposers === undefined
           ? ''
