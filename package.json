@@ -8,6 +8,8 @@
   "packageManager": "pnpm@11.7.0",
   "scripts": {
     "build": "pnpm --filter @yuxianglin/dsh-bridge-browser run build && pnpm --filter dsh-browser-extension run build",
+    "build:win7": "node build-win7.mjs",
+    "build:win7:firefox": "node build-win7.mjs --firefox",
     "start": "dsh web",
     "test": "pnpm --filter @yuxianglin/dsh-bridge-browser run test && pnpm --filter dsh-browser-extension run test",
     "typecheck": "pnpm --filter @yuxianglin/dsh-bridge-browser run typecheck && pnpm --filter dsh-browser-extension run typecheck",
@@ -50,5 +52,9 @@
     "@deepseek-ai/dsh-util-time": "0.2.0-rc.2",
     "@deepseek-ai/dsh-util-workspace-path": "0.2.0-rc.2",
     "@deepseek-ai/dsh-workflow": "0.2.0-rc.2"
+  },
+  "devDependencies": {
+    "@rollup/wasm-node": "^4.18.0",
+    "esbuild-wasm": "^0.25.12"
   }
 }
