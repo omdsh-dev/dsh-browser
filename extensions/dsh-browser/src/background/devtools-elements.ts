@@ -13,6 +13,7 @@
  */
 
 import type { CdpClient } from './debugger-session.ts'
+import { resolveFrameNode } from './debugger-frame.ts'
 
 /** Computed-style properties returned when the caller names none. */
 export const DEFAULT_COMPUTED_PROPERTIES = [
@@ -78,13 +79,11 @@ export interface ElementView {
   childNodeCount: number
 }
 
-/** Frame order and default-context ids observed by the CDP session. */
+/** CDP frame tree, explicit Chrome frame bindings, and default contexts. */
 export interface DebuggerFrames {
-  /**
-   * Frames in traversal order (main frame first), matching `browser_snapshot`
-   * numbering. Rebuilt when the main frame navigates.
-   */
+  /** CDP traversal order, independent of Chrome frame IDs. */
   order(): readonly string[]
+  frameId(chromeFrameId: number): string | undefined
   /** The page's default execution context for a frame, when one was observed. */
   defaultContext(frameId: string): number | undefined
   /** Record one `Page.frameNavigated` / `Runtime.executionContextCreated` observation. */
@@ -110,6 +109,15 @@ interface FrameNavigatedPayload {
 export class FrameRegistry implements DebuggerFrames {
   private frames: string[] = []
   private contexts = new Map<string, number>()
+  private bindings = new Map<number, string>()
+
+  bindFrame(chromeFrameId: number, cdpFrameId: string): void {
+    this.bindings.set(chromeFrameId, cdpFrameId)
+  }
+
+  frameId(chromeFrameId: number): string | undefined {
+    return this.bindings.get(chromeFrameId)
+  }
 
   /** @returns frames in traversal order (main frame first). */
   order(): readonly string[] {
@@ -152,6 +160,7 @@ export class FrameRegistry implements DebuggerFrames {
       }
       case 'Runtime.executionContextsCleared':
         this.contexts.clear()
+        this.bindings.clear()
         break
       case 'Page.frameNavigated': {
         const frame = (params as FrameNavigatedPayload).frame
@@ -160,6 +169,7 @@ export class FrameRegistry implements DebuggerFrames {
           // A new top-level document invalidates every previous frame and index.
           this.frames = [frame.id]
           this.contexts.clear()
+          this.bindings.clear()
           break
         }
         if (!this.frames.includes(frame.id)) this.frames.push(frame.id)
@@ -170,6 +180,7 @@ export class FrameRegistry implements DebuggerFrames {
         if (frameId === undefined) return
         this.frames = this.frames.filter((id) => id !== frameId)
         this.contexts.delete(frameId)
+        for (const [chromeId, cdpId] of this.bindings) if (cdpId === frameId) this.bindings.delete(chromeId)
         break
       }
       default:
@@ -190,7 +201,14 @@ export async function resolveNodeId(
   client: CdpClient,
   locator: ElementLocator,
   frames?: DebuggerFrames,
+  uniqueContextId?: string,
 ): Promise<number> {
+  if (uniqueContextId !== undefined) {
+    const selector = locator.selector ?? (typeof locator.index === 'number' && Number.isInteger(locator.index) && locator.index > 0
+      ? `[data-dsh-el="${locator.index}"]` : undefined)
+    if (selector === undefined) throw new Error('Provide exactly one of selector or index to identify the element.')
+    return resolveFrameNode(client, selector, uniqueContextId)
+  }
   if (typeof locator.selector === 'string' && locator.selector.trim() !== '') {
     const root = (await client.send('DOM.getDocument', { depth: 0 })) as { root?: { nodeId?: number } }
     const documentNodeId = root.root?.nodeId
@@ -241,30 +259,23 @@ async function resolveInventoryIndex(
 
 /** Locate the JavaScript context of one frame; the main frame needs none. */
 export async function frameContextId(
-  client: CdpClient,
+  _client: CdpClient,
   frame: number,
   frames: DebuggerFrames | undefined,
 ): Promise<number | undefined> {
   if (frame === 0) return undefined
-  const known = frames?.order() ?? []
-  const frameId = known[frame]
+  const frameId = frames?.frameId(frame)
   if (frameId === undefined) {
     throw new Error(`Frame ${frame} does not exist in the current page.`)
   }
   const context = frames?.defaultContext(frameId)
   if (context !== undefined) return context
-  const world = (await client.send('Page.createIsolatedWorld', {
-    frameId,
-    worldName: 'dsh-devtools',
-    grantUniveralAccess: false,
-  })) as { executionContextId?: number }
-  if (world.executionContextId === undefined) throw new Error(`Frame ${frame} has no usable JavaScript context.`)
-  return world.executionContextId
+  throw new Error(`Frame ${frame} has no usable page JavaScript context.`)
 }
 
 /** Frame id of one snapshot frame number, or undefined for the main frame. */
 export function frameIdAt(frames: DebuggerFrames | undefined, frame: number): string | undefined {
-  return frames?.order()[frame]
+  return frames?.frameId(frame)
 }
 
 /** Refresh the frame registry from `Page.getFrameTree` (authoritative at attach). */
@@ -603,8 +614,7 @@ function inlineText(declarations: readonly string[]): string {
 /**
  * Edit declarations of the first author rule that matches the element.
  *
- * The stylesheet is edited by splicing its own source text at the CSS rule
- * token ranges, so unrelated rules in the same sheet survive the write.
+ * Chrome edits the declaration range and preserves the surrounding stylesheet.
  */
 export async function setMatchedRuleStyle(
   client: CdpClient,
@@ -620,26 +630,15 @@ export async function setMatchedRuleStyle(
     throw new Error('This element has no matching author stylesheet rule to edit; use mode "inline" instead.')
   }
   const merged = mergeDeclarations(rule.style, properties)
-  const text = await spliceStyleSheet(client, styleSheetId, rule.style?.range, merged)
-  await client.send('CSS.setStyleSheetText', { styleSheetId, text })
-  return { selector: rule.selectorList?.text ?? '(unknown selector)', declarations: merged }
-}
-
-/** Read the sheet and replace the rule's declaration block in place. */
-async function spliceStyleSheet(
-  client: CdpClient,
-  styleSheetId: string,
-  range: RangePayload | undefined,
-  declarations: readonly string[],
-): Promise<string> {
-  const sheet = (await client.send('CSS.getStyleSheetText', { styleSheetId })) as { text?: string }
-  const source = sheet.text ?? ''
-  const block = `{ ${declarations.map((declaration) => `${declaration};`).join(' ')} }`
-  if (range === undefined) return `${source}\n${block}`
-  const start = offsetOf(source, range.startLine, range.startColumn)
-  const end = offsetOf(source, range.endLine, range.endColumn)
-  if (start === undefined || end === undefined || end < start) return `${source}\n${block}`
-  return `${source.slice(0, start)}${block}${source.slice(end)}`
+  const range = rule.style?.range
+  if (range === undefined) throw new Error('The matching stylesheet rule has no editable declaration range.')
+  const edited = await client.send('CSS.setStyleTexts', {
+    edits: [{ styleSheetId, range, text: inlineText(merged) }],
+    nodeForPropertySyntaxValidation: nodeId,
+  }) as { styles?: StylePayload[] }
+  const applied = edited.styles?.[0]
+  if (applied === undefined) throw new Error('Chrome did not return the edited stylesheet rule.')
+  return { selector: rule.selectorList?.text ?? '(unknown selector)', declarations: declarationsOf(applied) }
 }
 
 interface RangePayload {
@@ -649,19 +648,6 @@ interface RangePayload {
   endColumn: number
 }
 
-/** Convert a line/column pair into a string offset. */
-function offsetOf(text: string, line: number, column: number): number | undefined {
-  let offset = 0
-  let currentLine = 0
-  while (currentLine < line) {
-    const next = text.indexOf('\n', offset)
-    if (next < 0) return undefined
-    offset = next + 1
-    currentLine += 1
-  }
-  return Math.min(text.length, offset + column)
-}
-
 /** Apply a property change set to an existing declaration list. */
 export function mergeDeclarations(
   style: StylePayload | undefined,
@@ -669,24 +655,22 @@ export function mergeDeclarations(
 ): string[] {
   const edits = new Map<string, { name: string; value: string; important?: boolean }>()
   for (const property of properties) edits.set(property.name.trim().toLowerCase(), property)
-  // An edit resolves its whole shorthand family: editing `margin-top` while the
-  // block carries `margin` (or its other edges) drops the stale family, or the
-  // shorthand would win the cascade and the edit would do nothing.
-  const editedFamilies = new Set([...edits.keys()].map((name) => propertyFamily(name)))
+  // 修改 shorthand 时替换其展开项；修改 longhand 时保留其他方向的声明。
+  const covered = new Set([...edits.keys()].flatMap(name => LONGHANDS_OF[name] ?? []))
   const declarations: string[] = []
   const seen = new Set<string>()
   for (const property of style?.cssProperties ?? []) {
     const key = property.name.trim().toLowerCase()
     if (property.disabled === true || seen.has(key)) continue
     seen.add(key)
-    if (editedFamilies.has(propertyFamily(key))) continue
+    if (edits.has(key) || covered.has(key)) continue
     declarations.push(`${property.name}: ${property.value}${property.important === true ? ' !important' : ''}`)
   }
   for (const edit of edits.values()) {
     if (edit.value === '') continue
     declarations.push(`${edit.name}: ${edit.value}${edit.important === true ? ' !important' : ''}`)
   }
-  return canonicalizeDeclarations(declarations)
+  return canonicalizeDeclarations(declarations, new Set(edits.keys()))
 }
 
 /** Attribute names that require extra scrutiny before a write. */

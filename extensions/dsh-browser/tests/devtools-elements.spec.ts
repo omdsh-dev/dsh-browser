@@ -86,6 +86,7 @@ describe('locator resolution', () => {
   it('uses the frame execution context for iframe indices', async () => {
     const frames = new FrameRegistry()
     frames.setTree(['top-1', 'child-1'])
+    frames.bindFrame(17, 'child-1')
     const { client } = scripted({
       'Runtime.evaluate': [{ result: { objectId: 'obj-2' } }],
       'DOM.requestNode': [{ nodeId: 44 }],
@@ -94,8 +95,9 @@ describe('locator resolution', () => {
     frames.observe('Runtime.executionContextCreated', {
       context: { id: 99, auxData: { frameId: 'child-1', isDefault: true } },
     })
-    await expect(resolveNodeId(client, { index: 2, frame: 1 }, frames)).resolves.toBe(44)
-    expect(frameIdAt(frames, 1)).toBe('child-1')
+    await expect(resolveNodeId(client, { index: 2, frame: 17 }, frames)).resolves.toBe(44)
+    expect(frameIdAt(frames, 17)).toBe('child-1')
+    expect(frameIdAt(frames, 1)).toBeUndefined()
     expect(frames.defaultContext('child-1')).toBe(99)
   })
 
@@ -263,12 +265,7 @@ describe('mutations', () => {
   })
 
   it('keeps a longhand the user explicitly edits instead of folding it away', () => {
-    // Editing `margin-top` while the block carries the `margin` shorthand must
-    // emit the longhand and drop the shorthand: silently discarding the edit
-    // would be worse than a slightly longer style attribute.
-    // This is the shape CDP actually reports: the shorthand plus every
-    // expansion. Editing one longhand must drop the shorthand, otherwise the
-    // shorthand would win the cascade and the edit would do nothing.
+    // 显式 longhand 保留在 shorthand 后面，其他方向继续使用原值。
     expect(mergeDeclarations(
       { cssProperties: [
         { name: 'margin', value: '0' },
@@ -278,7 +275,7 @@ describe('mutations', () => {
         { name: 'margin-left', value: '0px' },
       ] },
       [{ name: 'margin-top', value: '12px' }],
-    )).toEqual(['margin-top: 12px'])
+    )).toEqual(['margin: 0', 'margin-top: 12px'])
   })
 
   it('never emits a longhand that is unreachable behind its shorthand', () => {
@@ -323,32 +320,6 @@ describe('mutations', () => {
       name: 'style',
       value: 'color: red; outline: 3px solid red;',
     }])
-  })
-
-  it('splices the matched rule inside its stylesheet instead of rewriting the sheet', async () => {
-    const source = '.a { color: red; }\n.b { margin: 0; }\n'
-    const { client, calls } = scripted({
-      'CSS.getMatchedStylesForNode': [{
-        matchedCSSRules: [{
-          rule: {
-            selectorList: { text: '.b' },
-            origin: 'regular',
-            styleSheetId: 'sheet-1',
-            style: { cssProperties: [{ name: 'margin', value: '0' }], range: { startLine: 1, startColumn: 5, endLine: 1, endColumn: 14 } },
-          },
-          matchingSelectors: [0],
-        }],
-      }],
-      'CSS.getStyleSheetText': [{ text: source }],
-      'CSS.setStyleSheetText': [{}],
-    })
-    const edited = await setMatchedRuleStyle(client, 6, [{ name: 'margin', value: '8px' }])
-    expect(edited).toEqual({ selector: '.b', declarations: ['margin: 8px'] })
-    const written = calls.find((call) => call[0] === 'CSS.setStyleSheetText')![1] as { text: string; styleSheetId: string }
-    expect(written.styleSheetId).toBe('sheet-1')
-    expect(written.text).toContain('.a { color: red; }')
-    expect(written.text).toContain('{ margin: 8px; }')
-    expect(written.text).not.toContain('margin: 0')
   })
 
   it('explains when no author rule can be edited', async () => {

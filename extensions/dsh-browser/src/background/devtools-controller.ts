@@ -18,6 +18,9 @@ import {
   devToolsSupported,
 } from './debugger-session.ts'
 import { createDebuggerBroker, type DebuggerBroker, type DebuggerLease } from './debugger-broker.ts'
+import { resolveDebuggerFrame } from './debugger-frame.ts'
+import { listTabFrames } from './frames.ts'
+import type { CdpClient } from './debugger-session.ts'
 import {
   NetworkCapture,
   type NetworkEntry,
@@ -103,7 +106,7 @@ export interface DevToolsController {
   /** Current attachment state. */
   state(): DevToolsState
   /** Handle one devtools tool call by name. */
-  handle(name: string, args: Record<string, unknown>, sessionId?: string): Promise<{ text: string }>
+  handle(name: string, args: Record<string, unknown>, sessionId?: string, validate?: (target: DevToolsTarget) => Promise<void>): Promise<{ text: string }>
   /** Drop the attachment for a tab (tab closed, binding changed). */
   releaseTab(tabId: number): void
   /** Detach everything and disable further commands (setting revoked). */
@@ -122,6 +125,8 @@ export interface DevToolsController {
 interface TabContext {
   tabId: number
   session: DebuggerSession
+  client?: CdpClient
+  executionContext?: string
   lease: DebuggerLease
   capture: NetworkCapture
   frames: FrameRegistry
@@ -334,15 +339,15 @@ export function createDevToolsController(options: DevToolsControllerOptions): De
    * Resolve the tab context for one call, enforcing the user's allowance.
    * @throws {DevToolsError} when unsupported, disabled, or the tab is unknown.
    */
-  const requireContext = async (sessionId?: string, allowAttach = true): Promise<{ context?: TabContext; target?: DevToolsTarget }> => {
-    if (allowAttach) return requireAttachedContext(sessionId)
+  const requireContext = async (sessionId?: string, allowAttach = true, validate?: (target: DevToolsTarget) => Promise<void>): Promise<{ context?: TabContext; target?: DevToolsTarget }> => {
+    if (allowAttach) return requireAttachedContext(sessionId, validate)
     if (!supported() || revoked) return {}
     const target = await targetFor(sessionId)
     const context = target === undefined ? undefined : contexts.get(target.tabId)
     return { ...(context === undefined ? {} : { context }), ...(target === undefined ? {} : { target }) }
   }
 
-  const requireAttachedContext = async (sessionId?: string): Promise<{ context: TabContext; target: DevToolsTarget }> => {
+  const requireAttachedContext = async (sessionId?: string, validate?: (target: DevToolsTarget) => Promise<void>): Promise<{ context: TabContext; target: DevToolsTarget }> => {
     if (!supported()) {
       throw new DevToolsError(
         'devtools-unavailable',
@@ -356,6 +361,7 @@ export function createDevToolsController(options: DevToolsControllerOptions): De
     if (target === undefined) {
       throw new DevToolsError('devtools-unavailable', 'No controlled tab is available for developer tools.')
     }
+    await validate?.(target)
     const blocked = undebuggableReason(target.url)
     if (blocked !== undefined) {
       clearFailure(blocked)
@@ -411,16 +417,32 @@ export function createDevToolsController(options: DevToolsControllerOptions): De
       context.capture.start(tabId)
       notify()
     },
-    handle: async (name, args, sessionId) => {
+    handle: async (name, args, sessionId, validate) => {
       // `status` must answer without resolving or attaching to a tab, so the
       // panel can show capture state even when the debugger is detached.
       const readOnly = name === 'browser_devtools_network' && args.action === 'status'
       try {
-        const { context, target } = await requireContext(sessionId, !readOnly)
+        const { context, target } = await requireContext(sessionId, !readOnly, validate)
+        if (target !== undefined) await validate?.(target)
         if (context === undefined || target === undefined) {
           // A status question is answerable from the shared state alone.
           if (readOnly) return finish(renderCaptureState(statusSnapshot(target?.tabId), 'status'))
           throw new DevToolsError('devtools-unavailable', 'No controlled tab is available for developer tools.')
+        }
+        const frameId = args.frame ?? 0
+        if (typeof frameId !== 'number' || !Number.isInteger(frameId) || frameId < 0) {
+          throw new Error('frame must be a non-negative integer from browser_snapshot.')
+        }
+        if (frameId !== 0) {
+          const frames = await listTabFrames(target.tabId, target.url)
+          const frame = frames.find(candidate => candidate.frameId === frameId)
+          if (frame === undefined) throw new Error(`Frame ${frameId} does not exist in the current page.`)
+          const resolved = await resolveDebuggerFrame(context.session, target.tabId, frame)
+          context.frames.bindFrame(frameId, resolved.frameId)
+          await resolved.client.send('DOM.enable')
+          await resolved.client.send('CSS.enable')
+          await validate?.(target)
+          return finish(await dispatch({ ...context, client: resolved.client, executionContext: resolved.uniqueId }, target, name, { ...args, frame: 0 }))
         }
         return finish(await dispatch(context, target, name, args))
       } catch (error: unknown) {
@@ -463,27 +485,30 @@ export function createDevToolsController(options: DevToolsControllerOptions): De
   // ---- Elements ----
 
   async function elements(context: TabContext, args: Record<string, unknown>): Promise<string> {
-    const nodeId = await resolveNodeId(context.session, locatorOf(args), context.frames)
+    const client = context.client ?? context.session
+    const nodeId = await resolveNodeId(client, locatorOf(args), context.frames, context.executionContext)
     const properties = stringList(args.properties)
-    const view = await inspectElement(context.session, nodeId, properties)
+    const view = await inspectElement(client, nodeId, properties)
     return renderElement(view)
   }
 
   async function setStyle(context: TabContext, args: Record<string, unknown>): Promise<string> {
+    const client = context.client ?? context.session
     const declarations = declarationList(args.properties)
-    const nodeId = await resolveNodeId(context.session, locatorOf(args), context.frames)
-    const node = await context.session.send('DOM.describeNode', { nodeId, depth: 0 }) as { node?: { localName?: string; nodeName?: string; attributes?: string[] } }
+    const nodeId = await resolveNodeId(client, locatorOf(args), context.frames, context.executionContext)
+    const node = await client.send('DOM.describeNode', { nodeId, depth: 0 }) as { node?: { localName?: string; nodeName?: string; attributes?: string[] } }
     const identity = shortIdentity(node.node ?? {}, pairsOf(node.node?.attributes))
     const mode = args.mode === 'rule' ? 'rule' : 'inline'
     if (mode === 'rule') {
-      const edited = await setMatchedRuleStyle(context.session, nodeId, declarations)
+      const edited = await setMatchedRuleStyle(client, nodeId, declarations)
       return renderStyleEdit(identity, 'rule', edited.selector, edited.declarations)
     }
-    const applied = await setInlineStyle(context.session, nodeId, declarations)
+    const applied = await setInlineStyle(client, nodeId, declarations)
     return renderStyleEdit(identity, 'inline', 'style attribute', applied)
   }
 
   async function setElementAttribute(context: TabContext, args: Record<string, unknown>): Promise<string> {
+    const client = context.client ?? context.session
     const name = typeof args.name === 'string' ? args.name.trim() : ''
     if (name === '') throw new Error('name is required.')
     const risk = attributeRisk(name)
@@ -496,16 +521,16 @@ export function createDevToolsController(options: DevToolsControllerOptions): De
         + 'Inline handler and resource URL attributes change what the page executes; use browser_console_eval for that.',
       )
     }
-    const nodeId = await resolveNodeId(context.session, locatorOf(args), context.frames)
-    const before = await attributeValue(context.session, nodeId, name)
+    const nodeId = await resolveNodeId(client, locatorOf(args), context.frames, context.executionContext)
+    const before = await attributeValue(client, nodeId, name)
     if (!remove && value === undefined) {
-      const node = await context.session.send('DOM.describeNode', { nodeId, depth: 0 }) as { node?: { localName?: string; nodeName?: string; attributes?: string[] } }
+      const node = await client.send('DOM.describeNode', { nodeId, depth: 0 }) as { node?: { localName?: string; nodeName?: string; attributes?: string[] } }
       const identity = shortIdentity(node.node ?? {}, pairsOf(node.node?.attributes))
       return renderAttributeResult(identity, name, before, undefined, 'read')
     }
-    await setAttribute(context.session, nodeId, name, value, remove)
+    await setAttribute(client, nodeId, name, value, remove)
     const after = remove ? undefined : value
-    const node = await context.session.send('DOM.describeNode', { nodeId, depth: 0 }) as { node?: { localName?: string; nodeName?: string; attributes?: string[] } }
+    const node = await client.send('DOM.describeNode', { nodeId, depth: 0 }) as { node?: { localName?: string; nodeName?: string; attributes?: string[] } }
     const identity = shortIdentity(node.node ?? {}, pairsOf(node.node?.attributes))
     return renderAttributeResult(identity, name, before, after, remove ? 'removed' : 'set')
   }
@@ -520,8 +545,9 @@ export function createDevToolsController(options: DevToolsControllerOptions): De
     const budget = numberArg(args.maxChars) ?? Math.min(maxChars, 8_000)
     let response: unknown
     try {
-      response = await context.session.send('Runtime.evaluate', {
+      response = await (context.client ?? context.session).send('Runtime.evaluate', {
         expression,
+        ...(context.executionContext === undefined ? {} : { uniqueContextId: context.executionContext }),
         ...(contextId === undefined ? {} : { contextId }),
         awaitPromise: args.awaitPromise === true,
         // CDP hands back an opaque "object Object" for plain objects unless the

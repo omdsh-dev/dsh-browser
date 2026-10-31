@@ -45,8 +45,8 @@ export function isDevToolsTool(name: string): boolean {
 /**
  * The approval prompt for one developer-tools call.
  *
- * Every devtools call is high privilege, so the prompt always renders and can
- * never be satisfied by the origin allowlist or unrestricted access. Only the
+ * Every devtools call requires its own consent or an explicit developer-tools
+ * setting/session grant. Origin trust and unrestricted access never cover it. Only the
  * model-facing presentation differs between read-shaped and action-shaped calls.
  * @param call - the tool call awaiting a decision.
  * @param frames - the controlled tab's frames, for the origin list.
