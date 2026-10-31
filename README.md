@@ -8,10 +8,10 @@ Connect [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) to t
 
 `dsh` is DeepSeek AI's open-source, plugin-based agent harness. This repository provides a companion browser bridge plugin and Chrome/Firefox MV3 extension as one standalone pnpm workspace.
 
-Browser operation remains text-only: pages become structured text with a numbered inventory of interactive elements, and the model addresses those elements by number. dsh 0.2.0 multimodal chat is separate from that page channel—the side panel accepts PNG, JPEG, WebP, and GIF attachments when the host advertises image support, while browser tools still never capture screenshots.
+Pages become structured text with a numbered inventory of interactive elements. Tools can address elements by number, selector, or coordinates; `browser_screenshot` captures the controlled tab's viewport after approval. The side panel also accepts PNG, JPEG, WebP, and GIF attachments when the host advertises image support.
 
 > [!IMPORTANT]
-> The workspace pins dsh 0.2.0-rc.2, the minimum supported runtime. Older DSH releases are not supported.
+> The workspace targets the latest public dsh release, currently pinned to 0.2.1-rc.5. Older DSH releases are not supported.
 
 ## Quick install
 
@@ -87,7 +87,7 @@ scripts/install.ps1
 
 ## Detailed installation and usage
 
-Requirements: Node.js `^22.19` or `>=24`, Corepack/pnpm, and Chrome 116+ or Firefox 140+. Windows additionally needs Windows PowerShell 5.1, which ships with Windows, or PowerShell 7+.
+Requirements: Node.js `>=24`, Corepack/pnpm, and Chrome 125+ or Firefox 140+. Windows additionally needs Windows PowerShell 5.1, which ships with Windows, or PowerShell 7+.
 
 ### Install or update
 
@@ -141,7 +141,7 @@ cd ~/.dsh/dsh-browser && pnpm start
 From a source checkout, run `pnpm start` in the repository root. The exact supported public runtime is:
 
 ```sh
-npx @deepseek-ai/dsh@0.2.0-rc.2 web
+npx @deepseek-ai/dsh@0.2.1-rc.5 web
 ```
 
 Local Chrome use requires no configuration; Firefox requires the local bridge token described above. Open a page, click the DeepSeek whale icon, and wait for **Connected**. Existing HTTP(S) tabs are instrumented on the first action. On browser-protected pages and extension stores, the model can read tab metadata and use browser-level HTTP(S) navigation, back, forward, and reload, but it cannot inspect or operate the protected page DOM.
@@ -183,6 +183,8 @@ Notes:
 
 `check:runtime` checks the resolved DSH dependencies and lockfile; `test:smoke` starts the real web host in a temporary DSH home and verifies the bridge and session reads after a restart, without model credentials. CI runs these checks after a clean installation.
 
+After building, run `pnpm test:browser` with a Playwright Chromium installation, or set `CHROMIUM_PATH` to a Chromium executable that supports loading unpacked extensions. This starts real DSH and Chromium instances to verify sharing controls, developer-tools consent, input, iframe uploads and targeting, and CSS edits. It needs no model credentials and saves results under `.artifacts/browser-smoke/`.
+
 If you encounter `cache.hydratePrepared is not a function`, update the repository, rerun `pnpm install --frozen-lockfile` and `pnpm run build`, then restart `pnpm start`. Session data and the global package cache can be kept.
 
 ## Security
@@ -190,7 +192,7 @@ If you encounter `cache.hydratePrepared is not a function`, update the repositor
 - The bridge path sits outside the `/api` trust boundary and performs its own bearer-token authentication.
 - Local Chrome extension origins retain zero-configuration loopback access; Firefox origins are per-install UUIDs and must present the bearer token.
 - Privileged gateway methods such as `settings.*`, `credentials.*`, and `host.open*` reject non-loopback sources.
-- The browser-page pipeline is text-only and never captures screenshots; explicitly attached chat images use dsh's durable attachment service. Password and payment-card values never leave the page.
+- Text snapshots mask password and payment-card values. Screenshots capture visible pixels without field masking and require approval unless unrestricted control is enabled; page sharing set to `off` blocks screenshots under restricted control. Screenshots and attached chat images use dsh's durable attachment service. Developer tools have a separate high-privilege consent gate.
 - When work begins, the assistant binds to the active tab (at prompt submission, or at the first direct browser-tool call). If you switch tabs manually, later browser actions pause and the side panel asks whether the assistant should stay on the original page or follow the current one, and offers "jump back to the assistant page" to move your own tab back to the assistant's page. Choosing the original page permits background operation; apart from that button the extension never silently retargets or changes your visible tab. Closing the controlled tab also pauses tools until you explicitly select the current page.
 - Text you highlight is captured only while a side panel is open and page sharing is not `off`, and never from password or payment-card fields. It stays inside the extension until you send the message, is dropped when you dismiss it or its page navigates or closes, and reaches the model inside the same untrusted-content boundary as page snapshots — including its source title and URL, which the page also controls.
 - Page-authored text is wrapped as untrusted input. The default `auto` mode reads only the controlled tab without an extra prompt; privacy-sensitive users can select `ask` for per-read confirmation or `off` to block reads entirely. In `ask` mode, the read dialog can allow one read or persistently switch back to `auto`; this can be reversed in Settings. Read page text is sent to the selected model.

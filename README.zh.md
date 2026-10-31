@@ -8,10 +8,10 @@
 
 `dsh` 是由 DeepSeek AI 开发的开源、插件化 agent harness（智能体框架）。本仓库将配套的浏览器桥插件与 Chrome/Firefox MV3 扩展组成一个独立的 pnpm workspace。
 
-浏览器操作仍采用纯文本设计：页面会转换为结构化文本和带编号的交互元素清单，模型通过编号定位元素。dsh 0.2.0 的多模态对话走独立通道——宿主声明图片能力时，侧栏可发送 PNG、JPEG、WebP 和 GIF；浏览器工具本身仍不会截取页面截图。
+页面会转换为结构化文本和带编号的交互元素清单。工具可以通过编号、选择器或坐标定位元素；`browser_screenshot` 经批准后截取受控标签页的可视区域。宿主声明图片能力时，侧栏也可发送 PNG、JPEG、WebP 和 GIF 附件。
 
 > [!IMPORTANT]
-> 当前工作区固定使用 dsh 0.2.0-rc.2，也是最低支持版本；不再支持旧版 DSH。
+> 工作区针对最新公开发布的 dsh，目前固定使用 0.2.1-rc.5；不支持旧版 DSH。
 
 ## 快速安装
 
@@ -87,7 +87,7 @@ scripts/install.ps1
 
 ## 详细安装与使用
 
-前置要求：Node.js `^22.19` 或 `>=24`、Corepack/pnpm，以及 Chrome 116+ 或 Firefox 140+。Windows 还需要系统自带的 Windows PowerShell 5.1，或 PowerShell 7+。
+前置要求：Node.js `>=24`、Corepack/pnpm，以及 Chrome 125+ 或 Firefox 140+。Windows 还需要系统自带的 Windows PowerShell 5.1，或 PowerShell 7+。
 
 ### 安装或更新
 
@@ -141,7 +141,7 @@ cd ~/.dsh/dsh-browser && pnpm start
 使用源码 checkout 时，请在仓库根目录运行 `pnpm start`。受支持的精确公开版本为：
 
 ```sh
-npx @deepseek-ai/dsh@0.2.0-rc.2 web
+npx @deepseek-ai/dsh@0.2.1-rc.5 web
 ```
 
 Chrome 本机使用无需配置；Firefox 需要填写上述本地桥 token。打开页面，点击 DeepSeek 鲸鱼图标，等待侧边栏显示**已连接**。已有 HTTP(S) 标签页会在第一次操作时自动加载。在浏览器受保护页面和扩展商店中，模型可以读取标签页元数据，并通过浏览器级能力导航到 HTTP(S)、后退、前进和刷新，但不能读取或操作受保护页面的 DOM。
@@ -183,6 +183,8 @@ pnpm --filter dsh-browser-extension run test
 
 `check:runtime` 检查实际解析的 DSH 依赖和锁文件；`test:smoke` 使用临时 DSH home 启动真实 web 宿主，验证桥接和重启后的会话读取，无需模型密钥。CI 在干净安装后运行这些检查。
 
+构建后运行 `pnpm test:browser`，需要已安装 Playwright Chromium，或通过 `CHROMIUM_PATH` 指定支持加载未打包扩展的 Chromium 可执行文件。测试会启动真实 DSH 和 Chromium，验证页面共享、开发者工具授权、输入、iframe 上传与定位，以及 CSS 修改。测试无需模型密钥，结果保存在 `.artifacts/browser-smoke/`。
+
 如果遇到 `cache.hydratePrepared is not a function`，更新仓库后重新运行 `pnpm install --frozen-lockfile` 和 `pnpm run build`，再重启 `pnpm start`。无需删除会话数据或清空全局缓存。
 
 ## 安全
@@ -190,7 +192,7 @@ pnpm --filter dsh-browser-extension run test
 - 桥路径在 `/api` 信任栅栏之外，自带 bearer token 认证。
 - Chrome 扩展的本地 Origin 保留零配置回环访问；Firefox Origin 是每次安装生成的 UUID，必须携带 bearer token。
 - 特权网关方法（`settings.*`/`credentials.*`/`host.open*`）对非回环来源一律拒绝。
-- 单活动连接；浏览器页面管线为纯文本且不截图；用户主动添加的对话图片交给 dsh 持久附件服务，密码和卡号值永不回传。
+- 文本快照会遮盖密码和卡号值。截图直接捕获可见像素，不会遮盖字段；除非启用了完全控制，否则截图需要审批，页面共享设为「关闭」时会阻止截图。截图和对话图片使用 dsh 持久附件服务。开发者工具有独立的高权限授权。
 - 助手开始工作时会绑定当时的活动标签页（提交提示时绑定；直接调用浏览器工具时则在首次调用绑定）。用户手动切页后，后续浏览器操作会暂停，侧栏会询问让助手留在原页面还是跟随当前页面，并提供「跳转回到助手页面」把你自己正在看的标签页切回助手页面；选择留在原页面后允许在后台继续，除该按钮外扩展不会切换用户正在看的页面、也不会静默改绑。受控标签页关闭后也会暂停，直到用户显式选择当前页面。
 - 只有在侧栏打开、且页面共享不是「关闭」时才会捕获划选内容，密码和卡号字段永不读取。内容在发送之前始终留在扩展内部；移除、页面跳转或标签页关闭都会丢弃它；发送时与页面快照一样包在不可信内容边界内，来源标题和 URL 同样由页面提供，因此也放在边界之内。
 - 网页文字会标记为不可信输入。默认「自动共享」只按需读取受控标签页且不额外弹窗；对隐私敏感时可选择「每次询问」，或用「关闭」完全阻断读取。在「每次询问」模式下，读取弹窗可以仅允许一次，也可以持久切回自动读取；之后仍可在设置中关闭。读取的页面文字会发送给当前选择的模型。

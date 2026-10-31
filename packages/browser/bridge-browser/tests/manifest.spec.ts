@@ -25,9 +25,7 @@ describe('plugin manifest', () => {
     expect(dsh.bundle?.patch).toBe('./cordis.patch.yml')
     expect(dsh.client?.platform).toBe('web')
     expect(dsh.client?.inject).toEqual(expect.arrayContaining(['@deepseek-ai/dsh-client-ui-slots']))
-    // The workspace pins 0.2.1-rc.3; the range keeps 0.2.1-rc.2 hosts supported
-    // (its plugin interfaces are unchanged) and admits later 0.2.x releases.
-    expect(engines.dsh).toBe('^0.2.1-rc.2')
+    expect(engines.dsh).toBe('^0.2.1-rc.5')
     expect(engines.node).toBe('>=24')
   })
 
@@ -36,7 +34,7 @@ describe('plugin manifest', () => {
     const dev = manifest.devDependencies as Record<string, string>
     const dshPeers = Object.keys(peers).filter(name => name.startsWith('@deepseek-ai/dsh'))
     expect(dshPeers.length).toBeGreaterThan(0)
-    for (const name of dshPeers) expect(peers[name]).toBe('^0.2.1-rc.2')
+    for (const name of dshPeers) expect(peers[name]).toBe('0.2.1-rc.5')
     for (const name of dshPeers) {
       // Every runtime peer is also a build-time dependency of this workspace.
       expect(dev[name] ?? peers[name]).toBeDefined()

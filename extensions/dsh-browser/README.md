@@ -4,7 +4,7 @@ English | [中文](README.zh.md)
 
 The **browser-operation end** of dsh: the model reads and operates the browser page you have open — extract content, click elements, fill forms, scroll, and navigate, all in the real page with your login state preserved. The side panel is the conversation entry.
 
-**Two explicit channels**: browser pages are still rendered as structured text (a numbered interactive-element inventory), so browser tools never take screenshots. Separately, a dsh 0.1.2 host can advertise multimodal image limits; the side panel then accepts PNG, JPEG, WebP, and GIF attachments and renders their durable history references.
+Browser pages are rendered as structured text with a numbered interactive-element inventory. `browser_screenshot` can also capture the controlled viewport after approval. When the DSH host advertises image support, the side panel accepts PNG, JPEG, WebP, and GIF attachments and renders their durable history references.
 
 
 ## What the model can do
@@ -12,6 +12,7 @@ The **browser-operation end** of dsh: the model reads and operates the browser p
 | Capability | Action | Notes |
 |---|---|---|
 | Read page | `browser_snapshot` | Title/URL/main text/numbered inventory/form fields (sensitive values masked); `delta: true` returns only changes, `frame` reads one iframe, `query` locates any element with selector and rect |
+| Capture viewport | `browser_screenshot` | Captures visible pixels without masking; requires screenshot approval unless unrestricted control is enabled |
 | Pointer | `browser_click` | Click/double-click/hover/press/release/drag by index or selector, or at frame-local coordinates |
 | Text | `browser_type` | Type text; `replace` clears first; `mode` chooses insertion or per-character keys |
 | Keys | `browser_press` | Keys and chords, including held modifiers across calls |
@@ -95,7 +96,7 @@ The recommended zero-configuration command does not require Git or a local clone
    Or use the exact supported public runtime:
 
    ```sh
-   npx @deepseek-ai/dsh@0.2.0-rc.2 web
+   npx @deepseek-ai/dsh@0.2.1-rc.5 web
    ```
 
    Both commands load the same bundle from the local `web` profile. Port 3080 is used by default; append `--port <port>` when it is occupied.
@@ -146,13 +147,13 @@ methods the bridge owns:
   here, and neither is a provisional chat's directory browsable: it answers
   empty until the first message creates the real Session.
 
-## Why browser operation stays text-only
+## Page reading and control
 
-- **Snapshot as the view**: the model's entire view of the page is structured text (title/URL/main/numbered elements/forms), budgeted at 32k chars by default (plugin-configurable, negotiated to the extension via `hello.ok`).
+- **Text snapshots**: title, URL, main text, numbered elements, and forms are budgeted at 32k chars by default (plugin-configurable, negotiated to the extension via `hello.ok`). Screenshots provide an additional image view after approval.
 - **Page text is untrusted input**: snapshots and targeted text reads are enclosed in a fresh nonce-bound trust marker and explicitly tell the model never to treat page-authored commands as instructions. This is defense in depth; extension-side action approval is the enforcement boundary.
 - **Stable numbering**: element numbers persist across snapshots (WeakMap + `data-dsh-el`), so the model can say "click 7"; a large page change explicitly reports "numbers reindexed".
 - **Delta mode**: `browser_snapshot({delta:true})` returns only changed element numbers, saving tokens.
-- **Privacy**: password/credit-card values always render as `••••` and never leave the page; accessible names never use a sensitive field's current value.
+- **Privacy**: text snapshots render password/credit-card values as `••••`; accessible names never use a sensitive field's current value. Screenshots capture visible pixels without masking. Developer-tools access requires separate consent.
 - **Tab affinity**: prompt submission binds the active tab before the model starts working; a direct browser-tool call also performs the initial bind when needed. A manual tab/window switch pauses later tools and asks whether the assistant should stay on the original page or follow the current one; that prompt also offers "jump back to the assistant page", which moves the user's own tab to the page the assistant is bound to. Staying permits explicit background operation without changing the user's visible tab; following resets page-reference state. A closed controlled tab fails closed until the user selects the current page, and a switch withdraws any open action approval.
 - **Proportional approval**: the default `auto` mode lets the model read the controlled tab without an extra prompt; `ask` restores per-read confirmation and `off` blocks reads. In `ask` mode, the read dialog can allow one read or persistently switch back to `auto`, which remains reversible in Settings. State-changing tools still fail closed and show their exact origin plus a redacted action summary. The user may deny, allow once, or trust one origin for the current side-panel session; temporary trust clears when the last panel closes or the service worker restarts. Permanent trust is managed explicitly in Settings. If the panel is closed, an approval remains pending for up to 60 seconds and, when enabled, a system notification opens the panel for review. The panel restores the requesting session before showing a session-scoped approval. Caller cancellation or bridge timeout withdraws any open approval before an action can run.
 - **Unrestricted control is explicit**: **Allow unrestricted browser control** becomes active only after the setting is saved successfully, then lets page reads, page actions, and tab list/follow/close operations run without confirmation. Calls capture their access mode when received, so enabling unrestricted control never retroactively elevates an existing restricted call. Disabling it takes effect immediately, cancels calls that have not dispatched an action, waits for already-dispatched browser operations to settle, and only then saves the restrictive setting. A rapid re-enable remains restricted until that revocation finishes, and concurrent saves persist in request order. Protected-page DOM content remains inaccessible.
@@ -162,23 +163,24 @@ methods the bridge owns:
 
 The developer-tools group drives the controlled tab through the Chrome debugger protocol (`chrome.debugger`), so it can inspect and edit page elements and CSS, run JavaScript in the page's own context, and capture network traffic — including response bodies, which page-level interception cannot read reliably.
 
-- **Off by default**: every developer-tools call raises its own approval dialog. The dialog has its own heading and can allow once, trust the group for the current side-panel session, or deny. The blanket **Allow unrestricted browser control** switch and the persistent origin allowlist never cover this group.
-- **Turn it on deliberately**: **Allow developer tools** in Settings is the only way to run these calls without a per-call prompt. Turning it off detaches the debugger immediately and cancels in-flight devtools calls; the session-scoped grant is cleared the moment the setting changes.
+- **Off by default**: developer-tools calls ask for approval until the user grants consent through Settings or the current side-panel session. The dialog offers allow once, trust this session, or deny. Session trust expires when the last panel closes or the worker restarts. The blanket **Allow unrestricted browser control** switch and the persistent origin allowlist never cover this group.
+- **Persistent consent**: **Allow developer tools** in Settings authorizes the group across panel sessions. Turning it off detaches the debugger and cancels in-flight devtools calls, including calls allowed by session trust. Navigation cancels pending approvals for the replaced document.
 - **One debugger per tab**: Chrome refuses a second debugger, so the browser's own DevTools cannot stay open on the same tab while capture is attached. The tool result explains this and tells you to close DevTools on that tab.
 - **Data handling**: capture is in memory only, bounded to 200 requests and 500 console entries, and resets on attach and on every top-level navigation. `Authorization`, `Cookie`, `Set-Cookie`, and similar header values are shown as `[redacted]` unless a call explicitly opts in, and bodies of authentication-shaped URLs are redacted by default.
 - **Platform**: Chrome only. The Firefox build does not request the `debugger` permission, so the host never registers the group there.
 
 ## Permissions
 
-Chrome uses `sidePanel`; Firefox uses `sidebar_action`. Both request `storage` (settings and recent-session continuity), `notifications` (optional reminders for approvals received while the panel is closed), `tabs` + `activeTab` + `scripting` (observe tab changes and inject/message the explicitly controlled tab, including lazy recovery for pages opened before install), `webNavigation` (enumerate and bind messages to that tab's frame documents), `alarms` (background keepalive), and `http/https` (content-script injection on normal pages). Chrome additionally requests `debugger`, which is what the opt-in developer-tools group needs; the Firefox manifest omits it, so the group stays unavailable there. Firefox's AMO manifest declares the browsing activity, website content/activity, and personal communications that the add-on sends to the configured dsh/model service. Apart from an explicit click on "jump back to the assistant page", the extension never changes the visible tab and never silently follows a manual switch; background operation happens only after the user chooses to stay on the original page.
+Chrome uses `sidePanel`; Firefox uses `sidebar_action`. Both request `storage` (settings and recent sessions), `notifications` (optional approval reminders), `tabs` + `activeTab` + `scripting` (observe tab changes and instrument the controlled tab), `webNavigation` (bind operations to frame documents), `alarms` (background keepalive), and `<all_urls>` host access. Content scripts run on HTTP(S) pages. Chrome additionally requests `debugger` for trusted input and developer tools, plus `clipboardWrite` and `offscreen` for clipboard operations. Firefox omits these Chrome-specific capabilities. Firefox's AMO manifest declares the browsing activity, website content/activity, and personal communications sent to the configured dsh/model service. The extension can activate a tab through an explicit return-to-page action or `browser_follow_tab { activate: true }`; manual tab switches require a control-handoff decision.
 
 ## Known limitations
 
 - Only one extension connection at a time. An unopened browser profile never claims it; if another open panel replaces a live connection, the replaced client yields instead of starting a reconnect fight.
-- Developer tools are Chrome-only, need the user's setting or a per-call approval, and cannot attach while the browser's own DevTools is open on the same tab. Attaching shows Chrome's "being debugged" banner for that tab until the call finishes or the setting is turned off.
+- Developer tools require Chrome 125+, a setting/session grant or per-call approval, and an available debugger connection. Chrome shows its debugging banner while the connection remains attached, including during network capture.
 - Tab affinity is global to that extension connection rather than per chat session.
 - Accessible cross-origin iframes are snapshotted and operated with stable `(frame, index)` addresses. Restricted or short-lived frames are reported as unavailable without failing the whole page snapshot.
+- Trusted coordinate input requires accessible frame geometry. Cross-origin frame geometry that the content script cannot read is rejected; element-based content actions, frame uploads, and developer-tools targeting remain available.
 - Captcha/image-only controls cannot be handled — the tool result reports "elements with no accessible name" and asks the user to complete that step manually.
 - No automatic token rotation.
-- Synthetic `browser_press` events do not trigger browser-native default actions such as Tab focus movement, arrow-key scrolling, or Enter activation; use manual input when a workflow depends on those defaults.
+- Synthetic `browser_press` events do not trigger browser-native default actions such as Tab focus movement, arrow-key scrolling, or Enter activation. Chrome's trusted input channel supports these actions; Firefox uses synthetic input.
 - `browser_wait` considers page load plus a fixed quiet window, but does not observe continuously changing DOM state; a live-updating SPA may be reported as stable.

@@ -3,8 +3,12 @@ packages:
   - extensions/*
   - packages/*/*
 
-# Keep DSH peer providers explicit and on the tested 0.2.0-rc.2 release line.
+# DSH peer providers 由工作区显式提供，统一使用 0.2.1-rc.5。
 autoInstallPeers: false
+
+# OpenTelemetry SDK 的 peer 范围要求 API 低于 1.10.0。
+overrides:
+  '@opentelemetry/api': 1.9.1
 
 # dsh 运行时与扩展构建依赖这些受信任包的安装脚本。
 allowBuilds:

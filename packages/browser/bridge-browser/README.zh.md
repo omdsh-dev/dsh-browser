@@ -2,9 +2,9 @@
 
 [English](README.md) | 中文
 
-dsh 的**浏览器操作桥**：在宿主 webserver 上挂载一个 **token 认证的 WebSocket 通道**（`/ext/bridge`），供 Chrome 扩展连接；把扩展调用投影到 dsh 0.2 Typert Remotes、按连接跟随 Session 与 Remote Event 流，并注册**纯文本**的 `browser_*` 工具集——经扩展在真实浏览器中读取页面、点击元素、填写表单、滚动与导航，登录态保留。侧边栏是对话入口，工具才是产品本体。
+dsh 的**浏览器操作桥**挂载经过 token 认证的 WebSocket 通道（`/ext/bridge`）供浏览器扩展连接，把扩展调用投影到 DSH Typert Remotes，跟随 Session 与 Remote Event 流，并注册用于读取和操作受控标签页、截图、开发者工具的工具集。浏览器保留登录状态，侧栏提供对话界面。
 
-**纯文本浏览器工具，多模态对话透传**：页面快照仍是结构化文本（标题、正文、带编号的交互清单、敏感值打码的表单字段），所有浏览器动作按稳定编号寻址。通用 RPC 通道也会透传 dsh 0.2 的图片消息和持久附件读取；延迟创建的新会话只在宿主确实挂载附件服务时声明图片限制。
+页面快照包含结构化文本、编号控件和遮盖敏感值的表单字段。操作支持元素编号、选择器和坐标。截图和对话图片使用 DSH 持久附件服务；宿主挂载该服务时，延迟创建的会话会声明图片限制。
 
 
 ## 配置
@@ -41,13 +41,13 @@ cd $HOME\.dsh\dsh-browser; pnpm start
 
 开发者也可以 clone 仓库，在 checkout 中依次运行 `./scripts/install.sh` 和 `pnpm start`。本地模式直接使用当前分支，不会下载或覆盖源码。两种安装模式都会注册同一个 profile bundle；构建工具只从选定的 workspace 解析，绝不读取父 checkout 或父目录的 `node_modules`。
 
-当前工作区固定使用 dsh 0.2.1-rc.3；dsh 0.2.1-rc.2 的插件接口与之一致，仍是最低支持版本；更旧的 DSH 版本不再支持：
+工作区针对最新公开发布的 dsh，目前固定使用 0.2.1-rc.5；不支持旧版 DSH：
 
 ```sh
-npx @deepseek-ai/dsh@0.2.1-rc.3 web
+npx @deepseek-ai/dsh@0.2.1-rc.5 web
 ```
 
-插件清单自带这层声明：`engines.dsh`（`^0.2.1-rc.2`）与 `dsh.manifestVersion: 1` 让 dsh 在加载插件前就拒绝不兼容的宿主；插件页会直接读取 `locale/en.json` / `locale/zh.json` 里的标题与简介、以及 `icon.svg` 图标来展示，无需激活插件。
+插件清单自带这层声明：`engines.dsh`（`^0.2.1-rc.5`）与 `dsh.manifestVersion: 1` 让 dsh 在加载插件前拒绝不兼容的宿主；插件页直接读取 `locale/en.json` / `locale/zh.json` 里的标题与简介、以及 `icon.svg` 图标来展示，无需激活插件。
 
 安装器会把已解压扩展复制到 `~/.dsh/browser-extension` 并打开 `chrome://extensions`。在 Chrome 中加载这个稳定目录，然后使用侧边栏。扩展会自动发现回环连接，无需输入 token；非回环部署仍需要配置的 bearer token。
 
@@ -104,7 +104,7 @@ npx @deepseek-ai/dsh@0.2.1-rc.3 web
 
 ### 开发者工具（高权限）
 
-该组只在已连接的扩展声明 `devTools` 能力时注册——Chrome 构建会声明，Firefox 构建不会。扩展对每次调用保留自己的同意门槛：除非用户在侧栏设置里打开**允许开发者工具**，否则每次调用都会在侧栏弹出审批（仅允许这一次 / 本次会话信任 / 拒绝）。"完全控制浏览器"开关与持久化的 origin 白名单**都不会**覆盖这一组。
+该组只在已连接的扩展声明 `devTools` 能力时注册，Chrome 构建会声明，Firefox 构建不会。每次调用需要设置中的**允许开发者工具**、当前侧栏会话授权或逐次审批（仅允许一次 / 本次会话信任 / 拒绝）。最后一个侧栏关闭或 worker 重启后，会话信任失效。「完全控制浏览器」开关与持久化 origin 白名单不覆盖这一组。
 
 | 工具 | 用途 |
 |---|---|

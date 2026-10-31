@@ -2,9 +2,9 @@
 
 English | [中文](README.zh.md)
 
-The **browser-operation bridge** for dsh: mounts a token-authenticated WebSocket carrier (`/ext/bridge`) that the Chrome extension connects to, projects its calls onto dsh 0.2 Typert Remotes, follows Session and Remote Event streams per connection, and registers the text-only `browser_*` tool set that reads and operates the user's active tab through the extension — click elements, fill forms, scroll, and navigate in the real browser, login state preserved. The side panel is the conversation entry; the tools are the product.
+The **browser-operation bridge** for dsh mounts a token-authenticated WebSocket carrier (`/ext/bridge`) for the browser extension, projects its calls onto DSH Typert Remotes, follows Session and Remote Event streams, and registers tools for reading and operating the controlled tab, capturing screenshots, and using developer tools. The browser retains its login state, and the side panel provides the conversation UI.
 
-**Text-only browser tools, multimodal chat passthrough**: page snapshots stay structured text (title, main content, numbered interactive inventory, and masked form fields), and every browser action uses stable inventory numbers. The generic RPC carrier also passes dsh 0.2 image prompts and durable attachment reads; deferred new sessions expose image limits only when the host actually mounts the attachment service.
+Page snapshots contain structured text with numbered controls and masked form fields. Actions support element numbers, selectors, and coordinates. Screenshots and chat images use DSH's durable attachment service; deferred sessions expose image limits when the host mounts that service.
 
 
 ## Config
@@ -41,13 +41,13 @@ cd $HOME\.dsh\dsh-browser; pnpm start
 
 Developers can instead clone the repository and run `./scripts/install.sh` followed by `pnpm start` from that checkout. The local mode uses the current branch without downloading or overwriting source files. Both installation modes register the same profile bundle; build tools resolve only from the selected workspace and never from a parent checkout or parent `node_modules` directory.
 
-The workspace pins dsh 0.2.1-rc.3; dsh 0.2.1-rc.2 exposes the same plugin interfaces and remains the minimum supported runtime. Older DSH releases are not supported:
+The workspace targets the latest public dsh release, currently pinned to 0.2.1-rc.5. Older DSH releases are not supported:
 
 ```sh
-npx @deepseek-ai/dsh@0.2.1-rc.3 web
+npx @deepseek-ai/dsh@0.2.1-rc.5 web
 ```
 
-The package manifest declares that support itself: `engines.dsh` (`^0.2.1-rc.2`) and `dsh.manifestVersion: 1` let dsh refuse an incompatible host before loading the plugin, and the Plugins page reads the localized title and description from `locale/en.json` / `locale/zh.json` plus the icon from `icon.svg` without activating the plugin.
+The package manifest declares that support itself: `engines.dsh` (`^0.2.1-rc.5`) and `dsh.manifestVersion: 1` let dsh refuse an incompatible host before loading the plugin, and the Plugins page reads the localized title and description from `locale/en.json` / `locale/zh.json` plus the icon from `icon.svg` without activating the plugin.
 
 The installer copies the unpacked extension to `~/.dsh/browser-extension` and opens `chrome://extensions`. Load that stable directory in Chrome and use the side panel. Loopback connections are discovered automatically and require no token entry; non-loopback deployments still require the configured bearer token.
 
@@ -122,7 +122,7 @@ Input delivery: element targeting and plain text stay in the content script and 
 
 ### Developer tools (high privilege)
 
-This group is registered only while the connected extension advertises the `devTools` capability, which Chrome builds do and Firefox builds do not. The extension keeps its own consent in front of every call: unless the user turned on **Allow developer tools** in the side-panel settings, each call asks in the side panel (allow once / trust for this session / deny). The blanket browser-control switch and the persistent origin allowlist deliberately do **not** cover this group.
+This group is registered only while the connected extension advertises the `devTools` capability, which Chrome builds do and Firefox builds do not. Each call requires consent through **Allow developer tools** in Settings, a current side-panel session grant, or a per-call approval (allow once / trust this session / deny). Session trust expires when the last panel closes or the worker restarts. The blanket browser-control switch and the persistent origin allowlist do not cover this group.
 
 | Tool | Purpose |
 |---|---|
