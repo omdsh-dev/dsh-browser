@@ -239,6 +239,14 @@ describe('dsh 0.2 Remote Host adapter', () => {
   })
 
   it('uses a session/follow snapshot for history and keeps that iterator for live events', async () => {
+    const message = {
+      type: 'assistant/message', seq: 1, time: 2, surfaceOp: 'append',
+      data: {
+        turn: 0, step: 0,
+        message: { role: 'assistant', content: [{ type: 'text', text: 'Hello!' }] },
+        stream: [{ type: 'text-chunks', time0: 2, index: 0, dt: [2, -1], texts: ['Hel', 'lo', '!'] }],
+      },
+    }
     const { api, open, peer } = harness({
       open: async (endpoint, _payload, _uplink, _peer, signal) => {
         if (endpoint === '$events') {
@@ -254,18 +262,10 @@ describe('dsh 0.2 Remote Host adapter', () => {
             async *[Symbol.asyncIterator]() {
               yield {
                 type: 'snapshot',
-                cursor: 3,
+                cursor: 1,
                 records: [
                   { type: 'event', event: { type: 'user/message', seq: 0, time: 1, data: {} } },
-                  {
-                    type: 'chunks',
-                    event: {
-                      type: 'chunkrow/text-chunks',
-                      seq: 1,
-                      time: 2,
-                      data: { turn: 0, step: 0, index: 0, dt: [2, -1], texts: ['Hel', 'lo', '!'] },
-                    },
-                  },
+                  { type: 'event', event: message },
                 ],
                 hasMore: false,
                 projections: { asOfSeq: 1, values: { imageLimits: { maxImageBytes: 10 } } },
@@ -291,24 +291,7 @@ describe('dsh 0.2 Remote Host adapter', () => {
       value: {
         events: [
           { event: { type: 'user/message', seq: 0, time: 1, data: {} } },
-          {
-            event: {
-              type: 'assistant/chunk', seq: 1, time: 2,
-              data: { turn: 0, step: 0, chunk: { type: 'text-delta', index: 0, text: 'Hel' } },
-            },
-          },
-          {
-            event: {
-              type: 'assistant/chunk', seq: 2, time: 4,
-              data: { turn: 0, step: 0, chunk: { type: 'text-delta', index: 0, text: 'lo' } },
-            },
-          },
-          {
-            event: {
-              type: 'assistant/chunk', seq: 3, time: 3,
-              data: { turn: 0, step: 0, chunk: { type: 'text-delta', index: 0, text: '!' } },
-            },
-          },
+          { event: message },
         ],
         hasMore: false,
         projections: { asOfSeq: 1, values: { imageLimits: { maxImageBytes: 10 } } },
