@@ -1141,9 +1141,8 @@ async function authorizeToolCall(
   if (result.status !== 'decision') return result.status
   const { decision } = result
   if (prompt.devTools === true) {
-    // "Trust this session" and the dedicated decision both arm the ephemeral
-    // devtools grant until the panel lease, the worker, or the setting ends it.
-    if (decision === 'trust-session' || decision === 'trust-dev-tools') {
+    // 授权持续到侧栏关闭、worker 终止或用户修改设置。
+    if (decision === 'trust-session') {
       if (panelPorts.size === 0) return 'cancelled'
       sessionDevToolsGrant = true
       devTools.resume()
@@ -1158,13 +1157,6 @@ async function authorizeToolCall(
   }
   if (decision === 'trust-session' && prompt.kind === 'action' && prompt.canTrust && prompt.origins.length === 1) {
     sessionTrustedActionOrigins.add(prompt.origins[0]!)
-    return 'approved'
-  }
-  // Retain wire compatibility with panels from the previous build. The new UI
-  // manages permanent trust explicitly in Settings instead of offering it in
-  // the action dialog.
-  if (decision === 'trust-origin' && prompt.kind === 'action' && prompt.canTrust && prompt.origins.length === 1) {
-    await persistSettings({ trustedActionOrigins: [...settings.trustedActionOrigins, prompt.origins[0]!] })
     return 'approved'
   }
   return decision === 'allow-once' ? 'approved' : 'denied'

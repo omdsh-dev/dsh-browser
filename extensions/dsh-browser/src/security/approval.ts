@@ -1,7 +1,7 @@
 /** Shared panel/background contract for browser action approval. */
 
 export type ApprovalKind = 'read' | 'action'
-export type ApprovalDecision = 'deny' | 'allow-once' | 'always-allow-reads' | 'trust-session' | 'trust-origin' | 'trust-dev-tools'
+export type ApprovalDecision = 'deny' | 'allow-once' | 'always-allow-reads' | 'trust-session'
 /** Background authorization result; transport failures must not masquerade as a user decision. */
 export type ApprovalAuthorization = 'approved' | 'denied' | 'unavailable' | 'timed-out' | 'cancelled'
 
@@ -33,6 +33,4 @@ export function isApprovalDecision(value: unknown): value is ApprovalDecision {
     || value === 'allow-once'
     || value === 'always-allow-reads'
     || value === 'trust-session'
-    || value === 'trust-origin'
-    || value === 'trust-dev-tools'
 }
