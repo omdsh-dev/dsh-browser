@@ -50,17 +50,34 @@ async function command(args) {
   assert.equal(code, 0, output)
 }
 
-const inner = `<!doctype html><body><button id="inner" style="position:absolute;left:20px;top:20px;width:100px;height:50px">Inner target</button>
-  <input id="upload" type="file" style="position:absolute;top:90px">
-  <script>window.innerClicks=0;window.pageMarker='frame-world';document.querySelector('#inner').addEventListener('click',()=>window.innerClicks++)</script></body>`
-const childServer = createServer((_request, response) => { response.setHeader('content-type', 'text/html'); response.end(inner) })
+const inner = `<!doctype html><body style="margin:0;overflow:hidden"><button id="inner" style="position:absolute;left:20px;top:20px;width:100px;height:50px">Inner target</button>
+  <input id="upload" type="file" style="position:absolute;left:10px;top:100px;width:130px">
+  <div id="scroller" style="position:absolute;left:150px;top:20px;width:100px;height:120px;overflow:auto"><div style="height:1000px">Scroll target</div></div>
+  <script>
+    window.innerClicks=0;window.pageMarker='frame-world';window.pointerEvents=[];
+    document.querySelector('#inner').addEventListener('click',()=>window.innerClicks++);
+    for(const type of ['pointerdown','pointerup','pointermove','click','contextmenu','wheel']) document.addEventListener(type,event=>{
+      window.pointerEvents.push({type,x:event.clientX,y:event.clientY,button:event.button,shift:event.shiftKey,trusted:event.isTrusted});
+      if(type==='contextmenu') event.preventDefault();
+    });
+  </script></body>`
+const childServer = createServer((request, response) => {
+  response.setHeader('content-type', 'text/html')
+  if (request.url === '/nested') {
+    response.end(`<!doctype html><body style="margin:0">
+      <iframe id="nestedSame" src="/inner?nested-same" style="position:absolute;left:20px;top:20px;width:280px;height:160px;border:7px solid;padding:3px;transform:scale(.9) rotate(4deg);transform-origin:0 0"></iframe>
+      <iframe id="nestedCross" src="${origin}/inner?nested-cross" style="position:absolute;left:390px;top:20px;width:280px;height:160px;border:7px solid;padding:3px"></iframe></body>`)
+    return
+  }
+  response.end(inner)
+})
 childServer.listen(0, '127.0.0.1')
 await once(childServer, 'listening')
 const crossOrigin = `http://127.0.0.1:${childServer.address().port}`
 const crossSiteOrigin = `http://localhost:${childServer.address().port}`
 const server = createServer((request, response) => {
   response.setHeader('content-type', 'text/html')
-  if (request.url === '/inner') { response.end(inner); return }
+  if (request.url.startsWith('/inner')) { response.end(inner); return }
   response.end(`<!doctype html><style>#button { color: rgb(1, 2, 3); background-color: rgb(240, 240, 240); margin: 2px 3px 4px 5px; }
     #unrelated { color: rgb(4, 5, 6) }</style><body>
     <button id="button" style="position:absolute;left:20px;top:20px;width:100px;height:50px">Target</button>
@@ -71,6 +88,7 @@ const server = createServer((request, response) => {
     <iframe id="same" src="/inner" style="position:absolute;left:300px;top:200px;width:280px;height:160px;border:0"></iframe>
     <iframe id="cross" src="${crossOrigin}/inner" style="position:absolute;left:600px;top:200px;width:280px;height:160px;border:0"></iframe>
     <iframe id="crossSite" src="${crossSiteOrigin}/inner" style="position:absolute;left:900px;top:200px;width:280px;height:160px;border:0"></iframe>
+    <iframe id="nested" src="${crossSiteOrigin}/nested" style="position:absolute;left:300px;top:480px;width:740px;height:240px;border:5px solid;padding:4px"></iframe>
     <p style="position:absolute;top:400px">Public page text</p><span id="unrelated" style="position:absolute;top:440px">Unrelated</span>
     <script>
       window.executed=0;window.events=[];window.disabledClicks=0;
@@ -114,7 +132,8 @@ try {
     executablePath: process.env.CHROMIUM_PATH ?? chromium.executablePath(),
     channel: 'chromium', headless: true,
     env: { ...process.env, TMPDIR: runtimeTmp },
-    args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
+    viewport: { width: 1280, height: 900 },
+    args: ['--site-per-process', `--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
   })
   const worker = browser.serviceWorkers()[0] ?? await browser.waitForEvent('serviceworker')
   const extensionId = new URL(worker.url()).host
@@ -215,25 +234,83 @@ try {
   }
   results.push('caret insertion preserves selections in native and contenteditable fields')
 
-  const frameIds = await panel.evaluate(async ({ tabId, origin, crossOrigin, crossSiteOrigin }) => {
+  const frameUrls = {
+    same: `${origin}/inner`, cross: `${crossOrigin}/inner`, crossSite: `${crossSiteOrigin}/inner`,
+    nestedSame: `${crossSiteOrigin}/inner?nested-same`, nestedCross: `${origin}/inner?nested-cross`,
+  }
+  const frameIds = await panel.evaluate(async ({ tabId, frameUrls }) => {
     const frames = await chrome.webNavigation.getAllFrames({ tabId })
-    return { same: frames.find(frame => frame.url === `${origin}/inner`).frameId,
-      cross: frames.find(frame => frame.url === `${crossOrigin}/inner`).frameId,
-      crossSite: frames.find(frame => frame.url === `${crossSiteOrigin}/inner`).frameId }
-  }, { tabId, origin, crossOrigin, crossSiteOrigin })
+    return Object.fromEntries(Object.entries(frameUrls).map(([kind, url]) => [kind, frames.find(frame => frame.url === url).frameId]))
+  }, { tabId, frameUrls })
+  for (const url of [frameUrls.crossSite, `${crossSiteOrigin}/nested`, frameUrls.nestedCross]) {
+    const session = await browser.newCDPSession(page.frame({ url }))
+    assert.equal((await session.send('Page.getFrameTree')).frameTree.frame.url, url)
+    await session.detach()
+  }
+  results.push('site isolation creates verified separate CDP targets for cross-site and nested cross-site frames')
   const beforeEvents = await page.evaluate(() => window.events.length)
-  assert.equal((await tool('browser_click', { frame: frameIds.cross, point: { x: 40, y: 40 } })).isError, true)
+  for (const [kind, frame] of Object.entries(frameIds)) {
+    const document = page.frame({ url: frameUrls[kind] })
+    succeed(await tool('browser_click', { frame, point: { x: 40, y: 40 } }))
+    assert.equal(await document.evaluate(() => window.innerClicks), 1, kind)
+    const clicked = await document.evaluate(() => window.pointerEvents.find(event => event.type === 'click'))
+    assert.ok(clicked.trusted && Math.abs(clicked.x - 40) <= 1 && Math.abs(clicked.y - 40) <= 1, JSON.stringify({ kind, clicked }))
+    succeed(await tool('browser_click', { frame, selector: '#inner', trusted: true }))
+    assert.equal(await document.evaluate(() => window.innerClicks), 2, kind)
+    await document.evaluate(() => { window.pointerEvents = [] })
+    succeed(await tool('browser_click', { frame, action: 'drag', point: { x: 40, y: 40 }, to: { x: 100, y: 60 }, steps: 4 }))
+    const events = await document.evaluate(() => window.pointerEvents)
+    for (const [type, x, y] of [['pointerdown', 40, 40], ['pointerup', 100, 60]]) {
+      const event = events.find(event => event.type === type)
+      assert.ok(event?.trusted && Math.abs(event.x - x) <= 1 && Math.abs(event.y - y) <= 1, JSON.stringify({ kind, type, events }))
+    }
+    assert.ok(events.some(event => event.type === 'pointermove' && event.trusted), kind)
+    succeed(await tool('browser_scroll', { frame, point: { x: 180, y: 50 }, deltaY: 100 }))
+    await waitFor(() => document.locator('#scroller').evaluate(element => element.scrollTop > 0), `${kind} wheel scroll`)
+    assert.equal(await document.evaluate(() => window.pointerEvents.find(event => event.type === 'wheel')?.trusted), true, kind)
+  }
   assert.equal(await page.evaluate(() => window.events.length), beforeEvents)
-  assert.equal(await page.frame({ url: `${crossOrigin}/inner` }).evaluate(() => window.innerClicks), 0)
-  succeed(await tool('browser_click', { frame: frameIds.same, point: { x: 40, y: 40 } }))
-  assert.equal(await page.frame({ url: `${origin}/inner` }).evaluate(() => window.innerClicks), 1)
-  results.push('frame-local clicks translate same-origin coordinates and reject hidden cross-origin geometry')
+  results.push('trusted clicks, selector clicks, drags, and wheel scrolling hit all five frame types without clicking the outer page')
+
+  for (const transform of ['scale(.9) rotate(7deg)', 'perspective(500px) rotateY(25deg)', 'scale(.25) rotate(7deg)']) {
+    await page.locator('#same, #cross, #crossSite, #nested').evaluateAll((elements, transform) => {
+      document.body.style.minHeight = '1400px';
+      for (const element of elements) Object.assign(element.style, { border: '7px solid', padding: '3px', transform, transformOrigin: '0 0' });
+      window.scrollTo(0, 100);
+    }, transform)
+    assert.equal(await page.evaluate(() => scrollY), 100)
+    for (const [kind, frame] of Object.entries(frameIds)) {
+      const document = page.frame({ url: frameUrls[kind] })
+      await document.evaluate(() => { window.pointerEvents = [] })
+      succeed(await tool('browser_click', { frame, point: { x: 40, y: 40 } }))
+      const clicked = await document.evaluate(() => window.pointerEvents.find(event => event.type === 'click'))
+      assert.ok(clicked?.trusted && Math.abs(clicked.x - 40) <= 1 && Math.abs(clicked.y - 40) <= 1, JSON.stringify({ kind, transform, clicked }))
+      await document.locator('#scroller').evaluate(element => { element.scrollTop = 0 })
+      succeed(await tool('browser_scroll', { frame, point: { x: 180, y: 50 }, deltaY: 100 }))
+      await waitFor(() => document.locator('#scroller').evaluate(element => element.scrollTop > 0), `${kind} transformed wheel scroll`)
+    }
+  }
+  await page.evaluate(() => window.scrollTo(0, 0))
+  results.push('frame coordinates survive borders, padding, page scrolling, nested transforms, rotation, scaling, and perspective')
+
+  const pointerFrame = page.frame({ url: frameUrls.crossSite })
+  await pointerFrame.evaluate(() => { window.pointerEvents = [] })
+  for (const [action, point] of [['down', { x: 40, y: 40 }], ['move', { x: 80, y: 50 }], ['up', { x: 100, y: 60 }]]) {
+    succeed(await tool('browser_click', { frame: frameIds.crossSite, action, point, modifiers: ['Shift'] }))
+  }
+  const heldEvents = await pointerFrame.evaluate(() => window.pointerEvents)
+  for (const type of ['pointerdown', 'pointermove', 'pointerup']) {
+    assert.ok(heldEvents.some(event => event.type === type && event.trusted && event.shift), JSON.stringify(heldEvents))
+  }
+  succeed(await tool('browser_click', { frame: frameIds.crossSite, point: { x: 40, y: 40 }, button: 'right', modifiers: ['Shift'] }))
+  assert.ok(await pointerFrame.evaluate(() => window.pointerEvents.some(event => event.type === 'contextmenu' && event.trusted && event.button === 2 && event.shift)))
+  results.push('out-of-process frames preserve pointer state across calls and receive trusted modifier/right-click gestures')
 
   const upload = join(directory, 'upload.txt')
   await writeFile(upload, 'Browser upload regression fixture')
   for (const [kind, frame] of Object.entries(frameIds)) {
     succeed(await tool('browser_upload', { frame, selector: '#upload', paths: [upload] }))
-    const url = `${kind === 'same' ? origin : kind === 'cross' ? crossOrigin : crossSiteOrigin}/inner`
+    const url = frameUrls[kind]
     assert.equal(await page.frame({ url }).locator('#upload').evaluate(input => input.files[0].name), 'upload.txt')
     assert.match(succeed(await tool('browser_console_eval', { frame, expression: 'window.pageMarker' })), /frame-world/)
     succeed(await tool('browser_devtools_set_element_attribute', { frame, selector: '#inner', name: 'data-tested', value: kind }))
