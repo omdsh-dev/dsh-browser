@@ -305,27 +305,33 @@ function targetLabel(args: Record<string, unknown>, el: Element): string {
  * @param el - target element.
  * @param clicks - 1, 2, or 3 clicks; 2 also emits `dblclick`.
  */
-function dispatchPointerClick(el: Element, clicks: number): void {
+function dispatchPointerClick(el: Element, clicks: number, button: number, modifiers: readonly string[]): void {
   const rect = el.getBoundingClientRect()
   const clientX = rect.left + rect.width / 2
   const clientY = rect.top + rect.height / 2
-  const base = { bubbles: true, cancelable: true, composed: true, clientX, clientY }
+  const base = {
+    bubbles: true, cancelable: true, composed: true, clientX, clientY, button,
+    altKey: modifiers.includes('Alt'), ctrlKey: modifiers.includes('Control'),
+    metaKey: modifiers.includes('Meta'), shiftKey: modifiers.includes('Shift'),
+  }
+  const buttons = button === 0 ? 1 : button === 1 ? 4 : 2
   for (let count = 1; count <= clicks; count += 1) {
     if (typeof PointerEvent === 'function') {
       el.dispatchEvent(new PointerEvent('pointerdown', {
-        ...base, pointerId: 1, pointerType: 'mouse', isPrimary: true, button: 0, buttons: 1,
+        ...base, pointerId: 1, pointerType: 'mouse', isPrimary: true, buttons,
       }))
     }
-    el.dispatchEvent(new MouseEvent('mousedown', { ...base, button: 0, buttons: 1, detail: count }))
+    el.dispatchEvent(new MouseEvent('mousedown', { ...base, buttons, detail: count }))
     if (typeof PointerEvent === 'function') {
       el.dispatchEvent(new PointerEvent('pointerup', {
-        ...base, pointerId: 1, pointerType: 'mouse', isPrimary: true, button: 0, buttons: 0,
+        ...base, pointerId: 1, pointerType: 'mouse', isPrimary: true, buttons: 0,
       }))
     }
-    el.dispatchEvent(new MouseEvent('mouseup', { ...base, button: 0, buttons: 0, detail: count }))
-    el.dispatchEvent(new MouseEvent('click', { ...base, button: 0, buttons: 0, detail: count }))
+    el.dispatchEvent(new MouseEvent('mouseup', { ...base, buttons: 0, detail: count }))
+    if (button === 2) el.dispatchEvent(new MouseEvent('contextmenu', { ...base, buttons: 0, detail: count }))
+    el.dispatchEvent(new MouseEvent(button === 0 ? 'click' : 'auxclick', { ...base, buttons: 0, detail: count }))
   }
-  if (clicks >= 2) el.dispatchEvent(new MouseEvent('dblclick', { ...base, button: 0, buttons: 0, detail: 2 }))
+  if (clicks >= 2 && button === 0) el.dispatchEvent(new MouseEvent('dblclick', { ...base, buttons: 0, detail: 2 }))
 }
 
 async function clickAction(args: Record<string, unknown>, ctx: ActionContext): Promise<ActionResult> {
@@ -338,12 +344,24 @@ async function clickAction(args: Record<string, unknown>, ctx: ActionContext): P
   }
   const el = resolveActionTarget(args, ctx.ids)
   const label = targetLabel(args, el)
+  if (el.matches(':disabled') || el.closest('button:disabled') !== null) {
+    throw new ActionError('action-failed', `Element ${label} is disabled.`)
+  }
+  const buttonName = args.button ?? 'left'
+  if (buttonName !== 'left' && buttonName !== 'middle' && buttonName !== 'right') {
+    throw new ActionError('bad-args', 'button must be left, middle, or right.')
+  }
+  const button = buttonName === 'left' ? 0 : buttonName === 'middle' ? 1 : 2
+  const modifiers = args.modifiers ?? []
+  if (!Array.isArray(modifiers) || modifiers.some(value => typeof value !== 'string' || !PRESS_MODIFIERS.has(value))) {
+    throw new ActionError('bad-args', 'modifiers must be a list of Alt, Control, Meta, or Shift.')
+  }
   const clicks = action === 'dblclick' ? 2 : args.clicks === undefined ? 1 : numberArg(args, 'clicks')
   if (clicks < 1 || clicks > 3) {
     throw new ActionError('bad-args', 'clicks must be 1, 2, or 3.')
   }
   el.scrollIntoView({ block: 'center', behavior: 'instant' })
-  if (el instanceof HTMLAnchorElement && clicks === 1) {
+  if (el instanceof HTMLAnchorElement && clicks === 1 && button === 0 && modifiers.length === 0) {
     const target = el.target.trim().toLowerCase()
     const sameFrameTarget = target === '' || target === '_self'
     let href: URL | undefined
@@ -398,10 +416,7 @@ async function clickAction(args: Record<string, unknown>, ctx: ActionContext): P
     setTimeout(() => { el.click() }, 0)
     return { text: `Clicked link ${label}. The link may open outside the controlled frame.` }
   }
-  if (el instanceof HTMLButtonElement && el.disabled) {
-    throw new ActionError('action-failed', `Button ${label} is disabled.`)
-  }
-  dispatchPointerClick(el, clicks)
+  dispatchPointerClick(el, clicks, button, modifiers)
   // An untrusted click runs no focus default action; text fields and editors
   // still expect a click to place the caret, which the next type/press relies on.
   if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement
@@ -457,13 +472,15 @@ function isEditable(el: Element): el is HTMLElement {
  * @param text - text to insert.
  * @param replace - whether to replace the host's current contents.
  */
-function typeIntoContentEditable(el: HTMLElement, text: string, replace: boolean): void {
+function typeIntoContentEditable(el: HTMLElement, text: string, replace: boolean, insert: boolean): void {
   // `isEditable` already refused a disabled island, so a null host here means
   // the element is editable without the attribute; address it directly.
   const host = editingHost(el) ?? el
   host.focus()
   const selection = host.ownerDocument.getSelection()
-  if (selection !== null) {
+  const selectionInside = selection !== null && selection.rangeCount > 0
+    && host.contains(selection.anchorNode) && host.contains(selection.focusNode)
+  if (selection !== null && (replace || !insert || !selectionInside)) {
     const range = host.ownerDocument.createRange()
     range.selectNodeContents(host)
     // A caret collapsed to the end appends; a full selection is replaced by insertText.
@@ -502,10 +519,17 @@ async function typeAction(args: Record<string, unknown>, ctx: ActionContext): Pr
   }
   const label = focusedOnly ? 'the focused element' : targetLabel(args, el)
   if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-    if (replace) setNativeValue(el, '')
-    setNativeValue(el, `${el.value}${text}`)
+    if (mode === 'insert' && !replace) {
+      const start = el.selectionStart
+      const end = el.selectionEnd
+      if (start === null || end === null) throw new ActionError('action-failed', 'This input does not expose a text selection.')
+      setNativeValue(el, `${el.value.slice(0, start)}${text}${el.value.slice(end)}`)
+      el.setSelectionRange(start + text.length, start + text.length)
+    } else {
+      setNativeValue(el, replace ? text : `${el.value}${text}`)
+    }
   } else if (isEditable(el)) {
-    typeIntoContentEditable(el, text, replace)
+    typeIntoContentEditable(el, text, replace, mode === 'insert')
   } else {
     throw new ActionError('action-failed', `Element ${label} is not editable (${el.tagName.toLowerCase()}).`)
   }

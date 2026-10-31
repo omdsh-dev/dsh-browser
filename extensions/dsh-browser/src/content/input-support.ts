@@ -91,7 +91,9 @@ function offsetChain(): FrameEdge[] {
   try {
     while (current !== current.parent) {
       const owner = current.frameElement
-      if (owner === null) break
+      if (owner === null) {
+        throw new ActionError('input-unavailable', 'The frame placement is unavailable across origins.')
+      }
       const rect = owner.getBoundingClientRect()
       edges.push({
         left: rect.left,

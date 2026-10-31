@@ -176,7 +176,8 @@ describe('trusted routing', () => {
     // Frame offset (100,50) is added to the frame-local point (10,20).
     expect(events[0]![1]).toMatchObject({ x: 110, y: 70, type: 'mousePressed' })
     expect(JSON.stringify(answer.result)).toContain('(trusted)')
-    expect(JSON.stringify(answer.result)).toContain('changed-after-input')
+    expect(JSON.stringify(answer.result)).not.toContain('changed-after-input')
+    expect(h.chrome.tabs.sendMessage).toHaveBeenCalledWith(42, expect.objectContaining({ action: 'browser_wait', includePageDelta: false }), { documentId: 'doc-frame' })
     expect(h.actions.map((action) => action.name)).toEqual(['browser_wait'])
   })
 
@@ -227,7 +228,7 @@ describe('trusted routing', () => {
   it('prepares a target and inserts text for trusted typing', async () => {
     const h = stubChrome()
     await run({ id: '1', name: 'browser_type', args: { text: 'hello', selector: '#target', mode: 'insert' } }, h, fakeRuntime(h))
-    expect(h.setups[0]!.request).toMatchObject({ op: 'prepare', selector: '#target', select: 'end' })
+    expect(h.setups[0]!.request).toMatchObject({ op: 'prepare', selector: '#target', select: 'none' })
     expect(h.runs[0]!.methods.filter(([method]) => method === 'Input.insertText')).toHaveLength(1)
   })
 

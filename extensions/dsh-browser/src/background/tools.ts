@@ -41,6 +41,7 @@ import { toViewportPoint, type Point } from '../shared/frame-geometry.ts'
 import type { InputSetupRequest, InputSetupResult, MeasuredTarget } from '../shared/input-setup.ts'
 import { writeClipboard } from './clipboard-write.ts'
 import type { ClipboardWriteOutcome } from '../shared/clipboard.ts'
+import { resolveDebuggerFrame } from './debugger-frame.ts'
 
 /** A tool call from the bridge. */
 export interface ToolCall {
@@ -513,7 +514,7 @@ function describeTarget(args: Record<string, unknown>): string {
 }
 
 /**
- * After trusted input, wait for the frame to settle and attach the page delta.
+ * After trusted input, wait for the frame to settle and attach an authorized page delta.
  * The `browser_wait` action already owns both behaviors for content-script
  * actions; reusing it keeps the result shape identical for real input.
  */
@@ -522,16 +523,17 @@ async function settleAfterInput(
   frame: TabFrame,
   status: string,
   budget: ContentBudget,
+  includePageDelta: boolean,
 ): Promise<ToolAnswer> {
   try {
     const response = await chrome.tabs.sendMessage(
       tabId,
-      { type: 'DSH_ACTION', action: 'browser_wait', args: {}, budget, includePageDelta: true },
+      { type: 'DSH_ACTION', action: 'browser_wait', args: {}, budget, includePageDelta },
       frame.documentId === undefined ? { frameId: frame.frameId } : { documentId: frame.documentId },
     )
     if (isToolAnswer(response)) {
       const pageContent = answerPageContent(response)
-      if (pageContent !== undefined) {
+      if (includePageDelta && pageContent !== undefined) {
         return { ok: true, result: { text: wrapActionDelta(`${status} (trusted)`, pageContent, frame, budget.maxChars) } }
       }
     }
@@ -574,6 +576,7 @@ function inputRoute(call: ToolCall): 'content' | 'trusted' | 'required' | 'host'
       return 'content'
     case 'browser_type':
       if (call.args.trusted === true) return 'required'
+      if (call.args.trusted === false) return 'content'
       if (call.args.mode === 'insert' || call.args.mode === 'keystrokes') return 'trusted'
       return 'content'
     case 'browser_scroll':
@@ -778,6 +781,7 @@ async function trustedClick(
   call: ToolCall,
   budget: ContentBudget,
   runtime: InputRuntime | undefined,
+  includePageDelta: boolean,
 ): Promise<ToolAnswer | undefined> {
   const args = call.args
   const action = requestedPointerAction(args.action)
@@ -808,7 +812,7 @@ async function trustedClick(
       ...(steps === undefined ? {} : { steps }),
     })
   })
-  return settleAfterInput(tabId, frame, `${action} at ${local.label}`, budget)
+  return settleAfterInput(tabId, frame, `${action} at ${local.label}`, budget, includePageDelta)
 }
 
 /** Trusted keyboard: real key events, including held modifiers. */
@@ -818,6 +822,7 @@ async function trustedPress(
   call: ToolCall,
   budget: ContentBudget,
   runtime: InputRuntime | undefined,
+  includePageDelta: boolean,
 ): Promise<ToolAnswer | undefined> {
   const args = call.args
   const key = typeof args.key === 'string' && args.key !== '' ? args.key : ''
@@ -839,7 +844,7 @@ async function trustedPress(
     })
   })
   const chord = modifiers.length === 0 ? key : `${modifiers.join('+')}+${key}`
-  return settleAfterInput(tabId, frame, `sent key "${chord}"${repeat > 1 ? ` x${repeat}` : ''}`, budget)
+  return settleAfterInput(tabId, frame, `sent key "${chord}"${repeat > 1 ? ` x${repeat}` : ''}`, budget, includePageDelta)
 }
 
 /** Trusted text: a caret insertion or per-character key events. */
@@ -849,13 +854,15 @@ async function trustedType(
   call: ToolCall,
   budget: ContentBudget,
   runtime: InputRuntime | undefined,
+  includePageDelta: boolean,
 ): Promise<ToolAnswer | undefined> {
   const args = call.args
   const text = typeof args.text === 'string' ? args.text : ''
   if (text === '') throw new InputError('bad-args', 'text must not be empty.')
   const mode = args.mode === 'keystrokes' ? 'keystrokes' : 'insert'
   const input = requireInput(runtime)
-  await prepareInputTarget(tabId, frame, args, args.replace === true ? 'contents' : 'end')
+  const selection = args.replace === true ? 'contents' : args.mode === 'insert' || args.mode === 'keystrokes' ? 'none' : 'end'
+  await prepareInputTarget(tabId, frame, args, selection)
   await input.run(tabId, async (client) => {
     await withFocusEmulation(client, async () => {
       if (mode === 'keystrokes') await typeAsKeystrokes(client, inputStates.get(tabId), text)
@@ -867,6 +874,7 @@ async function trustedType(
     frame,
     `entered ${text.length} characters into ${describeTarget(args)} (${mode})`,
     budget,
+    includePageDelta,
   )
 }
 
@@ -915,6 +923,7 @@ async function trustedWheel(
   call: ToolCall,
   budget: ContentBudget,
   runtime: InputRuntime | undefined,
+  includePageDelta: boolean,
 ): Promise<ToolAnswer | undefined> {
   const args = call.args
   const local = finitePoint(args.point)
@@ -937,6 +946,7 @@ async function trustedWheel(
     frame,
     `wheel delta ${Math.round(deltaX)},${Math.round(deltaY)} at ${Math.round(local.x)},${Math.round(local.y)}`,
     budget,
+    includePageDelta,
   )
 }
 
@@ -947,6 +957,7 @@ async function trustedClipboard(
   call: ToolCall,
   budget: ContentBudget,
   runtime: InputRuntime | undefined,
+  includePageDelta: boolean,
 ): Promise<ToolAnswer | undefined> {
   const args = call.args
   const text = typeof args.text === 'string' ? args.text : ''
@@ -968,7 +979,7 @@ async function trustedClipboard(
       await sendPasteShortcut(client, inputStates.get(tabId), navigator.userAgent)
     })
   })
-  return settleAfterInput(tabId, frame, `pasted the system clipboard into ${describeTarget(args)}`, budget)
+  return settleAfterInput(tabId, frame, `pasted the system clipboard into ${describeTarget(args)}`, budget, includePageDelta)
 }
 
 /** File attachment: mark the input, let the browser process read the paths. */
@@ -995,7 +1006,14 @@ async function trustedUpload(
     throw new InputSetupError('action-failed', 'The page returned an unexpected upload result.')
   }
   try {
-    await input.run(tabId, async (client) => { await setInputFiles(client, mark.selector, paths) })
+    await input.run(tabId, async (client) => {
+      if (frame.frameId === 0) {
+        await setInputFiles(client, mark.selector, paths)
+        return
+      }
+      const target = await resolveDebuggerFrame(client, tabId, frame)
+      await setInputFiles(target.client, mark.selector, paths, target.uniqueId)
+    })
   } finally {
     void sendInputSetup(tabId, frame, { op: 'upload-clear', token }).catch(() => undefined)
   }
@@ -1017,6 +1035,7 @@ async function dispatchTrustedInput(
   call: ToolCall,
   budget: ContentBudget,
   runtime: InputRuntime | undefined,
+  includePageDelta: boolean,
 ): Promise<ToolAnswer | undefined> {
   const route = inputRoute(call)
   if (route === 'content') return undefined
@@ -1024,17 +1043,17 @@ async function dispatchTrustedInput(
   try {
     switch (call.name) {
       case 'browser_clipboard':
-        return await trustedClipboard(tabId, frame, call, budget, runtime)
+        return await trustedClipboard(tabId, frame, call, budget, runtime, includePageDelta)
       case 'browser_upload':
         return await trustedUpload(tabId, frame, call, runtime)
       case 'browser_click':
-        return await trustedClick(tabId, frame, call, budget, runtime)
+        return await trustedClick(tabId, frame, call, budget, runtime, includePageDelta)
       case 'browser_press':
-        return await trustedPress(tabId, frame, call, budget, runtime)
+        return await trustedPress(tabId, frame, call, budget, runtime, includePageDelta)
       case 'browser_type':
-        return await trustedType(tabId, frame, call, budget, runtime)
+        return await trustedType(tabId, frame, call, budget, runtime, includePageDelta)
       case 'browser_scroll':
-        return await trustedWheel(tabId, frame, call, budget, runtime)
+        return await trustedWheel(tabId, frame, call, budget, runtime, includePageDelta)
       default:
         return undefined
     }
@@ -1069,11 +1088,12 @@ async function dispatchOnce(
   }
   const route = inputRoute(call)
   const syntheticFallback = route === 'trusted'
+  const hasSnapshotBaseline = snapshotDocumentsByTab.get(tabId)?.get(frameId) === frameDocumentKey(frame)
   if (route !== 'content') {
     // Commit before dispatching: a trusted gesture cannot be withdrawn once the
     // browser has delivered it, so the deadline must not abort it mid-flight.
     if (STATE_CHANGING_PAGE_TOOLS.has(call.name)) commitAction?.()
-    const trusted = await dispatchTrustedInput(tabId, frame, call, budget, inputRuntime)
+    const trusted = await dispatchTrustedInput(tabId, frame, call, budget, inputRuntime, includeActionDelta && hasSnapshotBaseline)
     if (trusted !== undefined) return trusted
     if (!syntheticFallback) {
       return inputUnavailable('This browser has no trusted input channel for this action.')
@@ -1083,7 +1103,6 @@ async function dispatchOnce(
   // approval cannot cross the final state-changing dispatch boundary.
   if (isCancelled(call, signal)) return cancelled()
   if (targetStillAllowed?.() === false) return targetChanged()
-  const hasSnapshotBaseline = snapshotDocumentsByTab.get(tabId)?.get(frameId) === frameDocumentKey(frame)
   const requestPageDelta = includeActionDelta && hasSnapshotBaseline && ACTION_DELTA_TOOLS.has(call.name)
   const navigationWait = includeActionDelta && isNavigationCandidateTool(call.name)
     ? waitForNextDocumentReady(tabId, frameId, frame.documentId, signal)

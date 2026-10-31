@@ -34,11 +34,18 @@ export class DevToolsError extends Error {
 }
 
 /** One `chrome.debugger.sendCommand` call, structurally typed for tests. */
-export type SendCommand = (target: { tabId: number }, method: string, params?: Record<string, unknown>) => Promise<unknown>
+export type SendCommand = (target: { tabId: number; sessionId?: string }, method: string, params?: Record<string, unknown>) => Promise<unknown>
 
 /** The CDP command surface every developer-tools feature module depends on. */
 export interface CdpClient {
   send(method: string, params?: Record<string, unknown>): Promise<unknown>
+  executionContexts?(): Promise<readonly FrameExecutionContext[]>
+}
+
+export interface FrameExecutionContext {
+  frameId: string
+  uniqueId: string
+  client: CdpClient
 }
 
 /** The subset of `chrome.debugger` this module uses. */
@@ -47,8 +54,8 @@ export interface DebuggerApi {
   detach(target: { tabId: number }): Promise<void>
   sendCommand: SendCommand
   onEvent: {
-    addListener(listener: (source: { tabId?: number }, method: string, params?: unknown) => void): void
-    removeListener(listener: (source: { tabId?: number }, method: string, params?: unknown) => void): void
+    addListener(listener: (source: { tabId?: number; sessionId?: string }, method: string, params?: unknown) => void): void
+    removeListener(listener: (source: { tabId?: number; sessionId?: string }, method: string, params?: unknown) => void): void
   }
   onDetach: {
     addListener(listener: (source: { tabId?: number }, reason: string) => void): void
@@ -105,6 +112,9 @@ export class DebuggerSession {
   private paused = false
   private disposeEvents: (() => void) | undefined
   private enabled: CdpDomain[] = []
+  private frameContexts = new Map<string, FrameExecutionContext>()
+  private childSessions = new Map<string, Promise<void>>()
+  private autoAttach: Promise<void> | undefined
 
   constructor(
     readonly tabId: number,
@@ -186,6 +196,26 @@ export class DebuggerSession {
    * @throws {DevToolsError} on timeout, detach, or a CDP error response.
    */
   send(method: string, params: Record<string, unknown> = {}): Promise<unknown> {
+    return this.sendToSession(undefined, method, params)
+  }
+
+  // Runtime 的 uniqueId 在导航和进程切换后不会复用。
+  async executionContexts(): Promise<readonly FrameExecutionContext[]> {
+    await this.enableDomains(['Runtime'])
+    this.autoAttach ??= this.send('Target.setAutoAttach', {
+      autoAttach: true, waitForDebuggerOnStart: false, flatten: true,
+      filter: [{ type: 'iframe', exclude: false }],
+    }).then(() => undefined)
+    await this.autoAttach
+    let count = -1
+    while (count !== this.childSessions.size) {
+      count = this.childSessions.size
+      await Promise.all(this.childSessions.values())
+    }
+    return [...this.frameContexts.values()]
+  }
+
+  private sendToSession(sessionId: string | undefined, method: string, params: Record<string, unknown> = {}): Promise<unknown> {
     if (!this.attached || this.paused) {
       return Promise.reject(new DevToolsError('devtools-detached', 'The developer-tools session is not attached to the page.'))
     }
@@ -209,7 +239,7 @@ export class DebuggerSession {
       this.pending.add(entry)
       let invocation: Promise<unknown>
       try {
-        invocation = this.api.sendCommand({ tabId: this.tabId }, method, params) as Promise<unknown>
+        invocation = this.api.sendCommand({ tabId: this.tabId, ...(sessionId === undefined ? {} : { sessionId }) }, method, params) as Promise<unknown>
       } catch (error: unknown) {
         settle(toDevToolsError(error, method))
         return
@@ -246,9 +276,36 @@ export class DebuggerSession {
   }
 
   private bindEvents(): void {
-    const onEvent = (source: { tabId?: number }, method: string, params?: unknown): void => {
+    const onEvent = (source: { tabId?: number; sessionId?: string }, method: string, params?: unknown): void => {
       if (source.tabId !== this.tabId) return
-      this.listeners.onCdpEvent?.(method, params)
+      const prefix = `${source.sessionId ?? ''}:`
+      if (method === 'Runtime.executionContextCreated') {
+        const context = (params as { context: { id: number; uniqueId: string; auxData?: { frameId?: string; isDefault?: boolean } } }).context
+        if (context.auxData?.isDefault && context.auxData.frameId !== undefined) {
+          this.frameContexts.set(`${prefix}${context.id}`, {
+            frameId: context.auxData.frameId, uniqueId: context.uniqueId,
+            client: { send: (name, args) => this.sendToSession(source.sessionId, name, args) },
+          })
+        }
+      } else if (method === 'Runtime.executionContextDestroyed') {
+        this.frameContexts.delete(`${prefix}${(params as { executionContextId: number }).executionContextId}`)
+      } else if (method === 'Runtime.executionContextsCleared') {
+        for (const key of this.frameContexts.keys()) if (key.startsWith(prefix)) this.frameContexts.delete(key)
+      } else if (method === 'Target.attachedToTarget') {
+        const { sessionId } = params as { sessionId: string }
+        const ready = this.sendToSession(sessionId, 'Runtime.enable').then(async () => {
+          await this.sendToSession(sessionId, 'Target.setAutoAttach', {
+            autoAttach: true, waitForDebuggerOnStart: false, flatten: true,
+            filter: [{ type: 'iframe', exclude: false }],
+          })
+        })
+        this.childSessions.set(sessionId, ready)
+      } else if (method === 'Target.detachedFromTarget') {
+        const { sessionId } = params as { sessionId: string }
+        this.childSessions.delete(sessionId)
+        for (const key of this.frameContexts.keys()) if (key.startsWith(`${sessionId}:`)) this.frameContexts.delete(key)
+      }
+      if (source.sessionId === undefined) this.listeners.onCdpEvent?.(method, params)
     }
     const onDetach = (source: { tabId?: number }, reason: string): void => {
       if (source.tabId !== this.tabId) return
@@ -266,6 +323,9 @@ export class DebuggerSession {
   }
 
   private releaseEvents(): void {
+    this.frameContexts.clear()
+    this.childSessions.clear()
+    this.autoAttach = undefined
     this.disposeEvents?.()
     this.disposeEvents = undefined
   }

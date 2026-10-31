@@ -10,6 +10,7 @@
  */
 
 import type { CdpClient } from './debugger-session.ts'
+import { resolveFrameNode } from './debugger-frame.ts'
 import {
   MODIFIER_BITS,
   modifierMask,
@@ -402,8 +403,13 @@ export async function withFocusEmulation<T>(client: CdpClient, run: () => Promis
  * @param selector - selector produced by the content script's upload marker.
  * @param paths - host paths to attach.
  */
-export async function setInputFiles(client: CdpClient, selector: string, paths: readonly string[]): Promise<void> {
+export async function setInputFiles(client: CdpClient, selector: string, paths: readonly string[], uniqueContextId?: string): Promise<void> {
   if (paths.length === 0) throw new InputError('bad-args', 'paths must contain at least one local file path.')
+  if (uniqueContextId !== undefined) {
+    const nodeId = await resolveFrameNode(client, selector, uniqueContextId)
+    await client.send('DOM.setFileInputFiles', { files: [...paths], nodeId })
+    return
+  }
   const document = await client.send('DOM.getDocument', { depth: -1, pierce: true }) as { root?: { nodeId?: number } }
   const rootNodeId = document.root?.nodeId
   if (rootNodeId === undefined) throw new InputError('action-failed', 'The page document could not be resolved.')
