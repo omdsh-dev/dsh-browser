@@ -42,6 +42,7 @@ import { resolveToken } from './token.ts'
 import {
   createRemoteHostApi,
   type HostConnectionLike,
+  type PeerLike,
   type TypertGatewayLike,
 } from './remote-host-api.ts'
 import { isRecord, type BrowserHostApi } from './host-api.ts'
@@ -142,7 +143,28 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }
   if (connection === undefined) throw new Error('bridge-browser: dsh connection service is required')
   const tokenRes = await resolveToken(resolved.token)
-  mountBridge(ctx, resolved, tokenRes, createRemoteHostApi(gateway, connection))
+  mountBridge(ctx, resolved, tokenRes, createRemoteHostApi(gateway, connection, createHostPeer(ctx, connection)))
+}
+
+/**
+ * Mint the in-process Peer this Host speaks for.
+ *
+ * dsh 0.2.1 validates every Gateway call's Peer (`assertPeerLive`), so forwarding
+ * `undefined` fails with `Cannot read properties of undefined (reading
+ * 'signal')`. 0.2.0 has no `createPeer` and needs none: the Host then keeps the
+ * pre-0.2.1 behaviour and the Peer slot stays empty.
+ *
+ * @param ctx - Cordis context owning the Peer scope.
+ * @param connection - Host Connection service.
+ * @returns the Peer, or undefined on a runtime that does not mint them.
+ */
+function createHostPeer(ctx: Context, connection: HostConnectionLike): PeerLike | undefined {
+  if (typeof connection.createPeer !== 'function') return undefined
+  const peer = connection.createPeer({ principal: { kind: 'owner' } })
+  // The Peer lives exactly as long as this plugin instance; a disposed Peer
+  // would make every later call fail with `gateway/peer-disposed`.
+  ctx.effect(() => () => peer.dispose?.(), 'bridge-browser: Host Peer scope')
+  return peer
 }
 
 function mountBridge(

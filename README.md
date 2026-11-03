@@ -11,7 +11,7 @@ Connect [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) to t
 Browser operation remains text-only: pages become structured text with a numbered inventory of interactive elements, and the model addresses those elements by number. dsh 0.2.0 multimodal chat is separate from that page channel—the side panel accepts PNG, JPEG, WebP, and GIF attachments when the host advertises image support, while browser tools still never capture screenshots.
 
 > [!IMPORTANT]
-> The workspace pins dsh 0.2.0-rc.2, the minimum supported runtime. Older DSH releases are not supported.
+> The workspace pins dsh 0.2.0-rc.2, the minimum supported runtime, and the bridge also runs on dsh 0.2.1 (verified on 0.2.1-rc.5). Older DSH releases are not supported.
 
 ## Quick install
 

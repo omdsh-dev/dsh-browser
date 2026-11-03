@@ -113,6 +113,48 @@ describe('apply', () => {
     await apply(stubContext(), VALID)
   })
 
+  // dsh 0.2.1 requires a live Peer on every Gateway call; 0.2.0 has no
+  // `createPeer` and must keep working without one.
+  it('mints an owner Peer when the Connection offers one and disposes it with the plugin scope', async () => {
+    const ctx = stubContext()
+    const dispose = vi.fn()
+    const peer = { signal: new AbortController().signal, principal: { kind: 'owner' as const }, dispose }
+    const createPeer = vi.fn(() => peer)
+    const connection = { ...(ctx.get('connection') as object), createPeer }
+    const get = ctx.get.bind(ctx)
+    vi.spyOn(ctx, 'get').mockImplementation((key) => key === 'connection' ? connection : get(key))
+    const scopes: Array<() => unknown> = []
+    const effect = ctx.effect.bind(ctx)
+    vi.spyOn(ctx, 'effect').mockImplementation((fn, label) => {
+      if (label !== 'bridge-browser: Host Peer scope') return effect(fn, label)
+      // Cordis: the effect callback returns the disposer.
+      scopes.push((fn as () => unknown)() as () => unknown)
+      return () => {}
+    })
+
+    await apply(ctx, { token: 'fixed-token', ...VALID, sessionWorkspacePath: '' })
+
+    expect(createPeer).toHaveBeenCalledWith({ principal: { kind: 'owner' } })
+    expect(scopes).toHaveLength(1)
+    expect(dispose).not.toHaveBeenCalled()
+    scopes[0]?.()
+    expect(dispose).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the Peer slot empty on a runtime without createPeer (dsh 0.2.0)', async () => {
+    const ctx = stubContext()
+    const mint = vi.fn()
+    const get = ctx.get.bind(ctx)
+    vi.spyOn(ctx, 'get').mockImplementation((key) => key === 'connection' ? { createSharedFetchHandler: () => ({ fetch: async () => new Response('') }) } : get(key))
+    vi.spyOn(ctx, 'effect').mockImplementation((fn, label) => {
+      if (label === 'bridge-browser: Host Peer scope') mint()
+      return (fn as () => unknown)() as () => void
+    })
+
+    await expect(apply(ctx, { token: 'fixed-token', ...VALID, sessionWorkspacePath: '' })).resolves.toBeUndefined()
+    expect(mint).not.toHaveBeenCalled()
+  })
+
   it('rejects invalid budgets loudly', async () => {
     await expect(apply(stubContext(), { ...VALID, toolTimeoutMs: 0 })).rejects.toThrow(/toolTimeoutMs/)
     await expect(apply(stubContext(), { ...VALID, snapshotMaxChars: -1 })).rejects.toThrow(/snapshotMaxChars/)

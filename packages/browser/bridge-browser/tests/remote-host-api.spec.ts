@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   createRemoteHostApi,
   type HostConnectionLike,
+  type PeerLike,
   type TypertGatewayLike,
 } from '../src/remote-host-api.ts'
 import type { HostRpcCall } from '../src/host-api.ts'
@@ -19,6 +20,7 @@ function harness(options: {
   invoke?: TypertGatewayLike['invoke']
   open?: TypertGatewayLike['wireStream']['open']
   fetch?: (request: Request) => Promise<Response>
+  peer?: PeerLike
 } = {}) {
   const invoke = vi.fn(options.invoke ?? (async () => ({ accepted: true })))
   const open = vi.fn(options.open ?? (async (_endpoint, _payload, _uplink, _peer, signal) => ({
@@ -47,7 +49,7 @@ function harness(options: {
   const connection: HostConnectionLike = {
     createSharedFetchHandler: () => ({ fetch }),
   }
-  return { api: createRemoteHostApi(gateway, connection), invoke, open, fetch, requestBodies }
+  return { api: createRemoteHostApi(gateway, connection, options.peer), invoke, open, fetch, requestBodies }
 }
 
 describe('dsh 0.2 Remote Host adapter', () => {
@@ -99,6 +101,31 @@ describe('dsh 0.2 Remote Host adapter', () => {
     controller.abort()
     await pending.catch(() => undefined)
     expect(open.mock.calls[0]?.[4]).toBeInstanceOf(AbortSignal)
+  })
+
+  // dsh 0.2.1 asserts the Peer of every Gateway call and stream
+  // (`assertPeerLive`), so forwarding `undefined` throws
+  // `Cannot read properties of undefined (reading 'signal')`.
+  it('speaks for the minted Connection Peer on streams and unary calls', async () => {
+    const peer: PeerLike = { signal: new AbortController().signal, principal: { kind: 'owner' } }
+    const open = vi.fn(async (_endpoint: string, _payload: unknown, _uplink: AsyncIterable<unknown>, admitted: unknown, signal: AbortSignal) => {
+      expect(admitted).toBe(peer)
+      return { async *[Symbol.asyncIterator]() { yield { type: 'ready', clientId: 'test', host: {} }; await abortWait(signal) } }
+    })
+    const { api, invoke } = harness({
+      peer,
+      open,
+      invoke: async () => ({ default: { provider: 'p', model: 'm' }, groups: [] }),
+    })
+    const controller = new AbortController()
+    const iterator = api.events(controller.signal)[Symbol.asyncIterator]()
+    const pending = iterator.next()
+    await vi.waitFor(() => expect(open).toHaveBeenCalled())
+    await expect(api.call(call('session.models', {}))).resolves.toMatchObject({ ok: true })
+    expect(open.mock.calls[0]?.[3]).toBe(peer)
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ peer }))
+    controller.abort()
+    await pending.catch(() => undefined)
   })
   it('preserves V3 durable streams and orders reconnect baselines before transient frames without advancing the durable cursor', async () => {
     const baseline = {
