@@ -7,17 +7,24 @@
  * @module
  */
 
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { BRIDGE_SESSION_PURGE_METHOD, DEFAULT_SNAPSHOT_MAX_CHARS } from '@yuxianglin/dsh-bridge-browser/src/protocol.ts'
 import type { BridgeCaps } from '@yuxianglin/dsh-bridge-browser/src/protocol.ts'
 import type { ServerFrame } from '@yuxianglin/dsh-bridge-browser/src/protocol.ts'
 import type { BridgeState } from '../background/bridge.ts'
 import type { AffinityTab, TabAffinityDecision, TabAffinityState } from '../background/tab-affinity.ts'
-import { connectPanel, PanelRpcError, type PanelApi, type PanelSettings } from './api.ts'
+import { connectPanel, PanelRpcError, type BridgeInstance, type DevToolsStatus, type DiscoveryStatus, type PanelApi, type PanelSettings } from './api.ts'
 import { renderMarkdown } from './markdown.ts'
 import whaleUrl from '../../assets/icons/deepseek-256.png'
 import type { ApprovalDecision, ApprovalRequest } from '../security/approval.ts'
-import { getUiLocale } from '../i18n.ts'
+import {
+  getUiLocale,
+  getUiLocalePreference,
+  saveUiLocalePreference,
+  watchUiLocalePreference,
+  type UiLocale,
+  type UiLocalePreference,
+} from '../i18n.ts'
 import { PANEL_COPY, type PanelCopy } from './strings.ts'
 import {
   applyUiScale,
@@ -28,6 +35,7 @@ import {
   stepUiScale,
   uiScaleAtLimit,
 } from './ui-scale.ts'
+import { canReturnToControlledTab } from './tab-handoff.ts'
 import { QuestionCard } from './QuestionCard.tsx'
 import { UpdateCard } from './UpdateCard.tsx'
 import { MessageImages } from './MessageImages.tsx'
@@ -65,6 +73,29 @@ import {
 } from './composer.ts'
 import { isNearScrollBottom } from './scroll.ts'
 import {
+  isExperimentalPreset,
+  isSelectablePreset,
+  parseSessionPermissions,
+  permissionLabel,
+  requiresRiskConfirmation,
+  type SessionPermissionDirectory,
+} from './permissions.ts'
+import {
+  localSlashEntries,
+  parseCommandDirectory,
+  parseSkillDirectory,
+  rankSlashEntries,
+  resolveComposerLine,
+  slashEntries,
+  slashQuery,
+  type ComposerCatalogs,
+  type ComposerCommandDirectory,
+  type ComposerSkillDirectory,
+  type HostCommand,
+  type HostSkill,
+  type SlashEntry,
+} from './commands.ts'
+import {
   latestSessionTitle,
   projectedSessionTitle,
   resumableSessions,
@@ -94,6 +125,32 @@ function normalizeWebOrigin(value: string): string | null {
   return normalizeTrustedOrigin(value) ?? null
 }
 
+/** One-line reason for an unavailable composer control, without raw stack text. */
+function describeCatalogFailure(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause)
+}
+
+/**
+ * The stable code a structured RPC failure carries, read structurally: the
+ * error class identity is not part of the contract, and reading it as
+ * `instanceof` would break any consumer that replaces the api module.
+ */
+function errorCodeOf(cause: unknown): string | undefined {
+  return typeof cause === 'object' && cause !== null && typeof (cause as { code?: unknown }).code === 'string'
+    ? (cause as { code: string }).code
+    : undefined
+}
+
+/** True when the bridge predates a Host method the panel now calls. */
+function isUnavailableMethod(cause: unknown): boolean {
+  return errorCodeOf(cause) === 'not-found' || /is unavailable/iu.test(describeCatalogFailure(cause))
+}
+
+/** True when the Host refused a command because the Session is still deferred. */
+function isProvisionalFailure(cause: unknown): boolean {
+  return errorCodeOf(cause) === 'provisional-session'
+}
+
 /** One editable API-relay profile in the settings view. */
 interface RelayProfileDraft {
   /** Stable llm-pi-ai provider-route key; empty until first save mints it. */
@@ -117,6 +174,8 @@ interface SessionModelOption {
   providerName: string
   id: string
   name: string
+  /** Reasoning efforts this model declares; empty when it declares none. */
+  efforts: Array<{ id: string; name: string }>
 }
 
 /** Advisory directory snapshot used by the composer model switcher. */
@@ -124,6 +183,14 @@ interface SessionModelDirectory {
   current: { provider: string; model: string; reasoningEffort?: string } | null
   options: SessionModelOption[]
   routable: boolean | null
+  /** Set when the last directory read failed, so the chip can explain itself. */
+  error?: string
+}
+
+/** One pending risk confirmation before a preset switch is submitted. */
+interface PermissionConfirmation {
+  preset: string
+  label: string
 }
 
 /**
@@ -183,6 +250,18 @@ function isManualOnlyDiscovery(cause: unknown): boolean {
 function isAuthFailure(cause: unknown): boolean {
   return cause instanceof PanelRpcError
     && (cause.code.includes('credential') || /\b401\b|\b403\b|invalid[ _-]?key/i.test(cause.message))
+}
+
+/** Extract image files from a paste or drop payload; empty when it carries none. */
+export function transferredImageFiles(dataTransfer: DataTransfer | null): File[] {
+  if (dataTransfer === null) return []
+  const files: File[] = []
+  for (const item of dataTransfer.items) {
+    if (item.kind !== 'file' || !item.type.startsWith('image/')) continue
+    const file = item.getAsFile()
+    if (file !== null) files.push(file)
+  }
+  return files
 }
 
 async function discoverOnce(
@@ -390,10 +469,14 @@ function TabAffinityBanner({
   state,
   copy,
   onDecision,
+  onReturn,
+  returnPending,
 }: {
   state: TabAffinityState | null
   copy: PanelCopy
   onDecision: (decision: TabAffinityDecision) => void
+  onReturn: () => void
+  returnPending: boolean
 }): React.JSX.Element | null {
   if (state === null || state.status === 'unbound' || state.status === 'following') return null
   const controlled = tabLabel(state.controlled, copy.tabHandoff.closedTab)
@@ -432,6 +515,17 @@ function TabAffinityBanner({
       </div>
       <p>{body}</p>
       <div className="tab-affinity-actions">
+        {canReturnToControlledTab(state) && (
+          <button
+            type="button"
+            className="return"
+            onClick={onReturn}
+            disabled={returnPending}
+            aria-busy={returnPending}
+          >
+            {copy.tabHandoff.returnToAssistant}
+          </button>
+        )}
         {handoff && <button className="keep" onClick={() => onDecision('keep')}>{copy.tabHandoff.keep}</button>}
         {state.active !== null && (
           <button className="follow" onClick={() => onDecision('follow')}>
@@ -470,6 +564,7 @@ function ApprovalDialog({
     return () => { window.removeEventListener('keydown', onKeyDown) }
   }, [request.id, onDecision])
 
+  const devTools = request.devTools === true
   return (
     <div className="approval-backdrop">
       <section className="approval-dialog" role="alertdialog" aria-modal="true" aria-labelledby="approval-title">
@@ -478,7 +573,9 @@ function ApprovalDialog({
           <span className="approval-shield"><ShieldIcon /></span>
           <div>
             <span className="eyebrow">{copy.approval.eyebrow}</span>
-            <h2 id="approval-title">{request.kind === 'read' ? copy.approval.readTitle : copy.approval.actionTitle}</h2>
+            <h2 id="approval-title">
+              {devTools ? copy.approval.devToolsTitle : request.kind === 'read' ? copy.approval.readTitle : copy.approval.actionTitle}
+            </h2>
           </div>
         </div>
         <div className="approval-detail">
@@ -494,21 +591,48 @@ function ApprovalDialog({
         <div className="approval-actions">
           <button className="deny" autoFocus onClick={() => onDecision('deny')}>{copy.approval.deny}</button>
           <button className="allow" onClick={() => onDecision('allow-once')}>{copy.approval.allowOnce}</button>
-          {request.kind === 'read' && (
+          {!devTools && request.kind === 'read' && (
             <button className="read-always" onClick={() => onDecision('always-allow-reads')}>{copy.approval.alwaysAllowReads}</button>
           )}
-          {request.kind === 'action' && request.canTrust && request.origins.length === 1 && (
+          {!devTools && request.kind === 'action' && request.canTrust && request.origins.length === 1 && (
             <button className="session-trust" onClick={() => onDecision('trust-session')}>{copy.approval.trustSession}</button>
+          )}
+          {devTools && (
+            <button className="session-trust" onClick={() => onDecision('trust-session')}>{copy.approval.trustDevTools}</button>
           )}
         </div>
         <small className="approval-footnote">
-          {request.kind === 'read'
-            ? copy.approval.readFootnote
-            : copy.approval.actionFootnote}
+          {devTools
+            ? copy.approval.devToolsFootnote
+            : request.kind === 'read'
+              ? copy.approval.readFootnote
+              : copy.approval.actionFootnote}
         </small>
       </section>
     </div>
   )
+}
+
+/**
+ * One-line description of the current developer-tools state.
+ *
+ * Before the background reports anything, the truthful description is the
+ * default posture: the capability is off and every call asks for approval.
+ */
+/** Whether the reported state carries a failure worth emphasizing. */
+function hasDevToolsError(status: DevToolsStatus | null): boolean {
+  return status !== null && status.error !== undefined && status.error !== ''
+}
+
+function devToolsStatusText(status: DevToolsStatus | null, copy: PanelCopy): string {
+  if (status === null) return copy.settings.devToolsOff
+  if (!status.supported) return copy.settings.devToolsUnsupported
+  if (status.error !== undefined && status.error !== '') return `${copy.settings.devToolsError} ${status.error}`
+  // An attachment can also come from trusted input while the developer-tools
+  // allowance is off; report the live attachment before the setting's default.
+  if (status.attached) return `${copy.settings.devToolsAttached}${status.tabId === undefined ? '' : ` (tab ${status.tabId})`}`
+  if (!status.enabled) return copy.settings.devToolsOff
+  return copy.settings.devToolsIdle
 }
 
 /**
@@ -622,7 +746,8 @@ const ToolActivity = memo(function ToolActivity({ row, copy }: { row: Row; copy:
 })
 
 export function App(): React.JSX.Element {
-  const locale = useMemo(() => getUiLocale(), [])
+  const [locale, setLocale] = useState<UiLocale>(() => getUiLocale())
+  const [localePreference, setLocalePreference] = useState<UiLocalePreference>(() => getUiLocalePreference())
   const copy = PANEL_COPY[locale]
   const [api] = useState<PanelApi>(() => connectPanel())
   const [state, setState] = useState<BridgeState>('stopped')
@@ -646,6 +771,7 @@ export function App(): React.JSX.Element {
   const [showTextSize, setShowTextSize] = useState(false)
   const [approvalQueue, setApprovalQueue] = useState<ApprovalRequest[]>([])
   const [tabAffinity, setTabAffinity] = useState<TabAffinityState | null>(null)
+  const [tabAffinityReturnPending, setTabAffinityReturnPending] = useState(false)
   const [trustedOriginInput, setTrustedOriginInput] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [showSessionPicker, setShowSessionPicker] = useState(false)
@@ -660,6 +786,23 @@ export function App(): React.JSX.Element {
   const [modelSelecting, setModelSelecting] = useState(false)
   const [showModelPicker, setShowModelPicker] = useState(false)
   const modelPickerRef = useRef<HTMLDivElement | null>(null)
+  const [sessionPermissions, setSessionPermissions] = useState<SessionPermissionDirectory | null>(null)
+  const [permissionBusy, setPermissionBusy] = useState(false)
+  const [showPermissionPicker, setShowPermissionPicker] = useState(false)
+  const [permissionConfirm, setPermissionConfirm] = useState<PermissionConfirmation | null>(null)
+  const [permissionError, setPermissionError] = useState<string | null>(null)
+  const permissionPickerRef = useRef<HTMLDivElement | null>(null)
+  const [commandDirectory, setCommandDirectory] = useState<ComposerCommandDirectory | null>(null)
+  const [skillDirectory, setSkillDirectory] = useState<ComposerSkillDirectory | null>(null)
+  const [showSlashMenu, setShowSlashMenu] = useState(false)
+  const [slashIndex, setSlashIndex] = useState(0)
+  const [notice, setNotice] = useState<string | null>(null)
+  const slashMenuRef = useRef<HTMLDivElement | null>(null)
+  const caretRef = useRef(0)
+  const composerCatalogsRef = useRef<{ commands: HostCommand[]; skills: HostSkill[] }>({
+    commands: [],
+    skills: [],
+  })
   const [sessionTitle, setSessionTitle] = useState<string | null>(null)
   const [resumeHint, setResumeHint] = useState<{ ready: boolean; sessionId: string | null }>({ ready: false, sessionId: null })
   const [questions, setQuestions] = useState<PendingQuestion[]>([])
@@ -786,6 +929,25 @@ export function App(): React.JSX.Element {
     saveUiScale(next)
   }
 
+  // UI language: the choice lives in storage (see `i18n.ts`), so this view
+  // applies it immediately and keeps the document language/title in sync. The
+  // watcher catches a change made from another side-panel window.
+  useEffect(() => {
+    document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en'
+    document.title = copy.documentTitle
+  }, [locale, copy])
+
+  useEffect(() => watchUiLocalePreference((preference) => {
+    setLocalePreference(preference)
+    setLocale(getUiLocale())
+  }), [])
+
+  function changeUiLocale(next: UiLocalePreference): void {
+    saveUiLocalePreference(next)
+    setLocalePreference(getUiLocalePreference())
+    setLocale(getUiLocale())
+  }
+
   // Settings: seed from storage, then let the panel own the form.
   useEffect(() => {
     void chrome.storage.local.get('dshSettings').then((stored) => {
@@ -795,6 +957,7 @@ export function App(): React.JSX.Element {
         token: raw?.token ?? '',
         sharePageContent: raw?.sharePageContent ?? 'auto',
         unrestrictedBrowserAccess: raw?.unrestrictedBrowserAccess ?? false,
+        allowDevTools: raw?.allowDevTools ?? false,
         trustedActionOrigins: raw?.trustedActionOrigins ?? [],
         approvalNotifications: raw?.approvalNotifications ?? true,
         autoResumeSession: raw?.autoResumeSession ?? true,
@@ -802,15 +965,60 @@ export function App(): React.JSX.Element {
     })
   }, [])
 
+  // Developer-tools state lives in the background: it owns the debugger
+  // attachment and reports every change here.
+  const [devToolsStatus, setDevToolsStatus] = useState<DevToolsStatus | null>(null)
+  useEffect(() => api.onDevToolsStatus(setDevToolsStatus), [api])
+
+  // Discovery state reported by the background. 'not-found' is terminal for the
+  // current panel lease, so the status chip can say so instead of "未连接".
+  const [discovery, setDiscovery] = useState<DiscoveryStatus>('idle')
+  const [bridgeAddress, setBridgeAddress] = useState<string | null>(null)
+  // Manual scan from the settings page: the only writer of this list.
+  const [detecting, setDetecting] = useState(false)
+  const [detected, setDetected] = useState<BridgeInstance[]>([])
+  const [detectAttempted, setDetectAttempted] = useState(false)
+  const [detectProgress, setDetectProgress] = useState<{ done: number; total: number } | null>(null)
+  const [detectError, setDetectError] = useState<string | null>(null)
+
+  useEffect(() => api.onDiscoveryProgress((progress) => {
+    setDetectProgress({ done: progress.done, total: progress.total })
+    setDetected(progress.instances)
+  }), [api])
+
+  const runDetection = async (): Promise<void> => {
+    if (detecting) {
+      await api.cancelDiscovery().catch(() => {})
+      return
+    }
+    setDetecting(true)
+    setDetectError(null)
+    setDetected([])
+    setDetectProgress(null)
+    try {
+      setDetected(await api.startDiscovery())
+    } catch (cause) {
+      // Cancellation is a user action, not an error worth showing.
+      if (cause instanceof PanelRpcError && cause.code === 'cancelled') return
+      setDetectError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setDetectAttempted(true)
+      setDetecting(false)
+      setDetectProgress(null)
+    }
+  }
+
   // 每次连接重启（连接配置变更/断线重连）都新建会话。状态消息逐条监听：
   // React 会把 stopped/connecting 等瞬时状态合并进同一帧渲染，依赖渲染
   // 状态无法可靠观察到"连接已重置"，因此在这里按消息粒度判定。
   const [sessionEpoch, setSessionEpoch] = useState(0)
   const lastStateRef = useRef<BridgeState | null>(null)
   useEffect(() => {
-    const offStatus = api.onStatus((next, nextCaps) => {
+    const offStatus = api.onStatus((next, nextCaps, nextDiscovery, nextAddress) => {
       setState(next)
       setCaps(nextCaps)
+      setDiscovery(nextDiscovery)
+      setBridgeAddress(nextAddress ?? null)
       const previous = lastStateRef.current
       lastStateRef.current = next
       if (previous !== null && next !== previous && next === 'stopped') {
@@ -838,9 +1046,23 @@ export function App(): React.JSX.Element {
         setStopping(false)
         setSessionChanging(false)
         setShowSessionPicker(false)
+        setSessionPermissions(null)
+        setPermissionBusy(false)
+        setShowPermissionPicker(false)
+        setPermissionConfirm(null)
+        setPermissionError(null)
+        setCommandDirectory(null)
+        setSkillDirectory(null)
+        setShowSlashMenu(false)
+        setNotice(null)
         stoppingRef.current = false
         clearQuestions()
         setSessionEpoch((epoch) => epoch + 1)
+      }
+      if (previous !== null && next !== previous && next === 'connected' && sessionRef.current !== null) {
+        // A reconnect can outlive a directory read; reload instead of trusting
+        // whatever the previous bridge generation answered.
+        void refreshComposerDirectories(sessionRef.current)
       }
     })
     const offEvent = api.onEvent((frame) => { void onFrame(frame) })
@@ -923,6 +1145,55 @@ export function App(): React.JSX.Element {
       document.removeEventListener('keydown', onKeyDown, true)
     }
   }, [showModelPicker])
+
+  // The permission menu is a sibling overlay, so it owns its own dismissal.
+  useEffect(() => {
+    if (!showPermissionPicker) return
+    const onPointerDown = (event: PointerEvent): void => {
+      const root = permissionPickerRef.current
+      if (root !== null && event.target instanceof Node && root.contains(event.target)) return
+      setShowPermissionPicker(false)
+    }
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setShowPermissionPicker(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true)
+      document.removeEventListener('keydown', onKeyDown, true)
+    }
+  }, [showPermissionPicker])
+
+  // The slash menu belongs to the composer: a pointer outside both closes it.
+  useEffect(() => {
+    if (!showSlashMenu) return
+    const onPointerDown = (event: PointerEvent): void => {
+      const menu = slashMenuRef.current
+      if (menu !== null && event.target instanceof Node && menu.contains(event.target)) return
+      if (event.target instanceof Element && event.target.closest('.composer-box') !== null) return
+      setShowSlashMenu(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    return () => { document.removeEventListener('pointerdown', onPointerDown, true) }
+  }, [showSlashMenu])
+
+  // A missed `turn/end` (dropped frame, panel opened mid-turn, sleep) must not
+  // disable the composer forever: re-read the Host's running flag on return.
+  useEffect(() => {
+    const onVisibilityChange = (): void => {
+      if (document.visibilityState !== 'visible') return
+      const sessionId = sessionRef.current
+      if (sessionId === null) return
+      void loadSessionCatalog().then(({ items }) => {
+        if (sessionRef.current !== sessionId) return
+        const entry = items.find((item) => item.sessionId === sessionId)
+        if (entry !== undefined) setWorking(entry.running)
+      }).catch(() => {})
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => { document.removeEventListener('visibilitychange', onVisibilityChange) }
+  }, [])
 
   function applyImageProjection(sessionId: string, seq: number, value: unknown): void {
     if (sessionRef.current !== sessionId || !Number.isSafeInteger(seq)) return
@@ -1038,6 +1309,12 @@ export function App(): React.JSX.Element {
       setWorking(false)
       clearQuestions()
       await refreshHistory(payload.sessionId)
+      return
+    }
+    if (payload.event.type === 'permission/preset') {
+      // Another panel (or the Web GUI) may have switched this Session's preset;
+      // the projection is the authority, so re-read it for every own Session.
+      if (payload.sessionId === sessionRef.current) void refreshSessionPermissions(payload.sessionId)
       return
     }
     if (payload.sessionId !== sessionRef.current) return
@@ -1181,7 +1458,7 @@ export function App(): React.JSX.Element {
     setSessionTitle(null)
     sessionRuntimeRef.current.seedRunning(created.sessionId, false)
     applyHistory(created.sessionId, await readHistory(created.sessionId))
-    await refreshSessionModels(created.sessionId)
+    await refreshComposerDirectories(created.sessionId)
   }
 
   /** Pull the advisory model directory for the active session into the composer menu. */
@@ -1196,7 +1473,11 @@ export function App(): React.JSX.Element {
       const result = await api.rpc<{
         current?: { provider: string; model: string; reasoningEffort?: string }
         routable?: boolean
-        groups?: Array<{ id: string; name: string; models: Array<{ id: string; name: string }> }>
+        groups?: Array<{
+          id: string
+          name: string
+          models: Array<{ id: string; name: string; reasoning?: { efforts?: Array<{ id?: unknown; name?: unknown }> } }>
+        }>
       }>('session.models', { sessionId })
       if (sessionRef.current !== sessionId) return
       const sessionOptions = (result.groups ?? []).flatMap((group) => group.models.map((model) => ({
@@ -1204,6 +1485,7 @@ export function App(): React.JSX.Element {
         providerName: group.name,
         id: model.id,
         name: model.name,
+        efforts: parseReasoningEfforts(model.reasoning?.efforts),
       })))
       const options = sessionOptions.length > 0 ? sessionOptions : (fromSettings?.options ?? [])
       setSessionModels({
@@ -1215,11 +1497,43 @@ export function App(): React.JSX.Element {
         routable: result.routable ?? fromSettings?.routable ?? null,
         options,
       })
-    } catch {
+    } catch (cause) {
       if (sessionRef.current !== sessionId) return
       // Host-wide settings still list configured relays before a session exists.
-      setSessionModels(fromSettings)
+      // An empty fallback is reported instead of a silently grey chip.
+      setSessionModels(fromSettings === null
+        ? {
+          current: null,
+          options: [],
+          routable: false,
+          error: cause instanceof Error ? cause.message : String(cause),
+        }
+        : { ...fromSettings, error: describeCatalogFailure(cause) })
     }
+  }
+
+  /** Refresh every composer-side directory for one Session in one pass. */
+  async function refreshComposerDirectories(sessionId: string | null = sessionRef.current): Promise<void> {
+    await Promise.all([
+      refreshSessionModels(sessionId),
+      refreshSessionPermissions(sessionId),
+      refreshComposerCatalogs(sessionId),
+    ])
+  }
+
+  /** Read the declared reasoning efforts out of one model catalog entry. */
+  function parseReasoningEfforts(value: unknown): Array<{ id: string; name: string }> {
+    if (!Array.isArray(value)) return []
+    const efforts: Array<{ id: string; name: string }> = []
+    for (const entry of value) {
+      if (typeof entry !== 'object' || entry === null) continue
+      const id = typeof (entry as { id?: unknown }).id === 'string' ? (entry as { id: string }).id.trim() : ''
+      const name = typeof (entry as { name?: unknown }).name === 'string'
+        ? (entry as { name: string }).name.trim()
+        : id
+      if (id !== '') efforts.push({ id, name: name === '' ? id : name })
+    }
+    return efforts
   }
 
   /** Build a composer directory from saved llm-pi-ai routes (works without a Host session). */
@@ -1230,7 +1544,7 @@ export function App(): React.JSX.Element {
     const providers = (described.namespaces?.find((candidate) => candidate.ns === 'llm-pi-ai')
       ?.value?.providers ?? {}) as Record<string, {
       displayName?: string
-      models?: Array<{ id: string; name?: string }>
+      models?: Array<{ id: string; name?: string; reasoning?: { efforts?: unknown } }>
     }>
     const defaults = (described.namespaces?.find((candidate) => candidate.ns === 'agent-default-model')
       ?.value ?? {}) as { provider?: unknown; model?: unknown; reasoningEffort?: unknown }
@@ -1242,6 +1556,7 @@ export function App(): React.JSX.Element {
           : provider,
         id: model.id,
         name: typeof model.name === 'string' && model.name !== '' ? model.name : model.id,
+        efforts: parseReasoningEfforts(model.reasoning?.efforts),
       }))
     )).filter((option) => option.id !== '')
     if (options.length === 0) return { current: null, options: [], routable: false }
@@ -1266,7 +1581,9 @@ export function App(): React.JSX.Element {
   /** Switch the next assembled turn onto the chosen provider/model. */
   async function selectSessionModel(option: SessionModelOption): Promise<void> {
     const sessionId = sessionRef.current
-    if (sessionId === null || modelSelecting || busy || working) return
+    // A selection only shapes the NEXT assembled turn, so a running turn (or an
+    // in-flight prompt) never blocks it — matching the Web GUI model picker.
+    if (sessionId === null || modelSelecting) return
     setShowModelPicker(false)
     if (sessionModels?.current?.provider === option.provider
       && sessionModels.current.model === option.id) return
@@ -1279,6 +1596,10 @@ export function App(): React.JSX.Element {
         sessionId,
         provider: option.provider,
         model: option.id,
+        // Keep the effort the user already chose when it applies to the new model.
+        ...(option.efforts.some((effort) => effort.id === sessionModels?.current?.reasoningEffort)
+          ? { reasoningEffort: sessionModels?.current?.reasoningEffort }
+          : {}),
       })
       if (sessionRef.current !== sessionId) return
       setSessionModels((current) => current === null
@@ -1296,6 +1617,151 @@ export function App(): React.JSX.Element {
       if (sessionRef.current === sessionId) {
         setError(cause instanceof Error ? cause.message : String(cause))
       }
+    } finally {
+      setModelSelecting(false)
+    }
+  }
+
+  /** Pull the Session's permission directory (catalog plus its current preset). */
+  async function refreshSessionPermissions(sessionId: string | null = sessionRef.current): Promise<void> {
+    if (sessionId === null) {
+      setSessionPermissions(null)
+      setShowPermissionPicker(false)
+      return
+    }
+    try {
+      const result = await api.rpc<unknown>('session.permissions', { sessionId })
+      if (sessionRef.current !== sessionId) return
+      const parsed = parseSessionPermissions(result)
+      setSessionPermissions(parsed)
+      if (parsed === null) setPermissionError(copy.app.permissionUnavailable)
+    } catch (cause) {
+      if (sessionRef.current !== sessionId) return
+      setSessionPermissions(null)
+      setPermissionError(isUnavailableMethod(cause) ? copy.app.permissionUnavailable : describeCatalogFailure(cause))
+    }
+  }
+
+  /**
+   * Pull the Host command and skill directories for the composer's `/` menu.
+   * A provisional Session answers empty with `provisional: true`; the panel
+   * then keeps the last real directory and says when it becomes authoritative.
+   */
+  async function refreshComposerCatalogs(sessionId: string | null = sessionRef.current): Promise<void> {
+    if (sessionId === null) {
+      setCommandDirectory(null)
+      setSkillDirectory(null)
+      setShowSlashMenu(false)
+      return
+    }
+    const [commands, skills] = await Promise.all([
+      api.rpc<unknown>('commands.list', { sessionId }).catch((cause: unknown) => cause),
+      api.rpc<unknown>('skills.list', { sessionId }).catch((cause: unknown) => cause),
+    ])
+    if (sessionRef.current !== sessionId) return
+    const commandDirectory = commands instanceof Error ? null : parseCommandDirectory(commands)
+    const skillDirectory = skills instanceof Error ? null : parseSkillDirectory(skills)
+    if (commandDirectory !== null) setCommandDirectory(commandDirectory)
+    if (skillDirectory !== null) setSkillDirectory(skillDirectory)
+    if (commandDirectory !== null && !commandDirectory.provisional) {
+      composerCatalogsRef.current = { ...composerCatalogsRef.current, commands: commandDirectory.commands }
+    }
+    if (skillDirectory !== null && !skillDirectory.provisional) {
+      composerCatalogsRef.current = { ...composerCatalogsRef.current, skills: skillDirectory.skills }
+    }
+  }
+
+  /** Switch the Session's permission preset, confirming the risky ones first. */
+  async function applyPermissionPreset(preset: string): Promise<void> {
+    const sessionId = sessionRef.current
+    if (sessionId === null || permissionBusy) return
+    setShowPermissionPicker(false)
+    setPermissionConfirm(null)
+    setPermissionBusy(true)
+    setPermissionError(null)
+    setNotice(null)
+    try {
+      const result = await api.rpc<{ result?: { kind?: string; text?: string } }>('session.setPermission', {
+        sessionId,
+        preset,
+      })
+      if (sessionRef.current !== sessionId) return
+      if (result?.result?.kind === 'error') {
+        setPermissionError(copy.app.permissionSwitchFailed(result.result.text ?? preset))
+        return
+      }
+      await refreshSessionPermissions(sessionId)
+    } catch (cause) {
+      if (sessionRef.current !== sessionId) return
+      setPermissionError(copy.app.permissionSwitchFailed(describeCatalogFailure(cause)))
+    } finally {
+      setPermissionBusy(false)
+    }
+  }
+
+  /** Open the confirmation for a risky preset, or switch directly. */
+  function requestPermissionPreset(preset: string, label: string): void {
+    if (!isSelectablePreset(preset) || permissionBusy) return
+    if (sessionPermissions?.current === preset) {
+      setShowPermissionPicker(false)
+      return
+    }
+    if (requiresRiskConfirmation(preset)) {
+      setShowPermissionPicker(false)
+      setPermissionConfirm({ preset, label })
+      return
+    }
+    void applyPermissionPreset(preset)
+  }
+
+  /** Run one Host command line; command output never becomes a model message. */
+  async function runCommandLine(line: string): Promise<boolean> {
+    const sessionId = sessionRef.current
+    if (sessionId === null) return false
+    setNotice(null)
+    setError(null)
+    try {
+      const result = await api.rpc<{ result?: { kind?: string; text?: string } }>('commands.execute', {
+        sessionId,
+        line,
+      })
+      if (sessionRef.current !== sessionId) return true
+      const failure = result?.result?.kind === 'error' ? result.result.text : undefined
+      if (failure !== undefined) setError(copy.app.commandFailed(failure))
+      else setNotice(result?.result?.text ?? copy.app.commandSucceeded)
+      // A permission line changed the Session's knobs; keep the chip honest.
+      void refreshSessionPermissions(sessionId)
+      return true
+    } catch (cause) {
+      if (sessionRef.current !== sessionId) return true
+      const reason = describeCatalogFailure(cause)
+      setError(isProvisionalFailure(cause) ? copy.app.commandProvisional : copy.app.commandFailed(reason))
+      return false
+    }
+  }
+
+  /** Move the next assembled turn onto a different reasoning effort. */
+  async function selectReasoningEffort(option: SessionModelOption, reasoningEffort: string | undefined): Promise<void> {
+    const sessionId = sessionRef.current
+    if (sessionId === null || modelSelecting) return
+    setShowModelPicker(false)
+    setModelSelecting(true)
+    setError(null)
+    try {
+      const result = await api.rpc<{
+        selected: { provider: string; model: string; reasoningEffort?: string }
+      }>('session.selectModel', {
+        sessionId,
+        provider: option.provider,
+        model: option.id,
+        ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+      })
+      if (sessionRef.current !== sessionId) return
+      setSessionModels((current) => current === null
+        ? { current: result.selected, routable: true, options: [option] }
+        : { ...current, current: result.selected, routable: true })
+    } catch (cause) {
+      if (sessionRef.current === sessionId) setError(describeCatalogFailure(cause))
     } finally {
       setModelSelecting(false)
     }
@@ -1349,7 +1815,7 @@ export function App(): React.JSX.Element {
             await api.setActiveSession(hinted)
             setSessionTitle(projectedSessionTitle(entry) ?? sessionDisplayTitle(entry))
             applyHistory(hinted, history)
-            await refreshSessionModels(hinted)
+            await refreshComposerDirectories(hinted)
             return
           }
         } catch {
@@ -1401,7 +1867,7 @@ export function App(): React.JSX.Element {
       sessionRef.current = entry.sessionId
       setSessionTitle(projectedSessionTitle(entry) ?? sessionDisplayTitle(entry))
       await refreshHistory(entry.sessionId)
-      await refreshSessionModels(entry.sessionId)
+      await refreshComposerDirectories(entry.sessionId)
     } catch (cause) {
       if (sessionTransitionRef.current === transition) {
         setError(cause instanceof Error ? cause.message : String(cause))
@@ -1450,7 +1916,7 @@ export function App(): React.JSX.Element {
       setSessionTitle(sessionId)
       if (history !== undefined) applyHistory(sessionId, history)
       else setError(historyError instanceof Error ? historyError.message : String(historyError))
-      await refreshSessionModels(sessionId)
+      await refreshComposerDirectories(sessionId)
     } finally {
       finishSessionTransition(transition)
     }
@@ -1545,8 +2011,47 @@ export function App(): React.JSX.Element {
     }
   }
 
+  /** Accept one `/` menu row: run a local action or insert its exact text. */
+  function pickSlashEntry(entry: SlashEntry): void {
+    setShowSlashMenu(false)
+    setSlashIndex(0)
+    setError(null)
+    setNotice(null)
+    if (entry.kind === 'local') {
+      setDraft(emptyComposerDraft())
+      if (entry.action === 'model') setShowModelPicker(true)
+      return
+    }
+    // Inserting (rather than executing) keeps the row's own input editable.
+    setDraft((current) => ({ ...current, text: entry.insert }))
+  }
+
+  /** Same arbitration as Enter: run the highlighted row, or submit the draft. */
+  function acceptSlashMenu(): void {
+    const picked = slashRows[slashActiveIndex]
+    if (picked === undefined) return
+    pickSlashEntry(picked)
+  }
+
+  /** Directories the composer resolves one submitted line against. */
+  function composerLineCatalogs(): ComposerCatalogs {
+    const cached = composerCatalogsRef.current
+    return {
+      // A provisional Session answers empty; the last real directory is a
+      // better guess than dropping the user's command on the floor.
+      commands: commandDirectory !== null && commandDirectory.commands.length > 0
+        ? commandDirectory.commands
+        : cached.commands,
+      skills: skillDirectory !== null && skillDirectory.skills.length > 0
+        ? skillDirectory.skills
+        : cached.skills,
+      local: localSlashEntries(copy),
+    }
+  }
+
   async function send(textOverride?: string): Promise<void> {
-    const text = (textOverride ?? input).trim()
+    const submitted = textOverride ?? input
+    const text = submitted.trim()
     const submittedImages = textOverride === undefined ? draftImages : []
     // A quick-start prompt asks about the whole page, not about a quote.
     const submittedSelection = textOverride === undefined ? selection : null
@@ -1554,6 +2059,36 @@ export function App(): React.JSX.Element {
     // busy state 是异步的：连续回车可能都通过 state 检查——用 ref 同步锁。
     if ((text === '' && submittedImages.length === 0 && submittedSelection === null)
       || busy || addingImagesRef.current || sendingRef.current || sessionChangingRef.current || id === null) return
+
+    // A line starting with `/` is a command or a skill, never an ordinary
+    // prompt: the Host adapter would reject an unknown one anyway, so the panel
+    // refuses it here and keeps the draft instead of sending something else.
+    const resolution = resolveComposerLine(submitted, composerLineCatalogs())
+    if (resolution.kind === 'unknown-command') {
+      setError(copy.app.unknownCommand(resolution.name))
+      return
+    }
+    if (resolution.kind === 'local') {
+      setDraft(emptyComposerDraft())
+      setShowSlashMenu(false)
+      if (resolution.name === 'model') setShowModelPicker(true)
+      return
+    }
+    if (resolution.kind === 'command') {
+      if (submittedImages.length > 0 || submittedSelection !== null) {
+        setError(copy.app.commandAttachmentsUnsupported)
+        return
+      }
+      sendingRef.current = true
+      setDraft(emptyComposerDraft())
+      setShowSlashMenu(false)
+      try {
+        await runCommandLine(resolution.line)
+      } finally {
+        sendingRef.current = false
+      }
+      return
+    }
     sendingRef.current = true
     const submittedDraft: ComposerDraft<DraftImage> = { text, images: submittedImages }
     if (textOverride === undefined) {
@@ -1575,7 +2110,7 @@ export function App(): React.JSX.Element {
         ...(clientTimeZone === undefined ? {} : { clientTimeZone }),
       })
       // Deferred sessions materialize on the first prompt; refresh so chips appear.
-      void refreshSessionModels(id)
+      void refreshComposerDirectories(id)
       if (submittedSelection !== null) {
         // Keep the background authoritative while the prompt is in flight.
         // Conditional clearing cannot consume a newer highlight captured in
@@ -1886,6 +2421,25 @@ export function App(): React.JSX.Element {
     }
   }
 
+  /**
+   * Ask the background to move this browser's visible tab back to the page the
+   * assistant is bound to. A stale revision means the user already switched
+   * again; the fresh state is on its way, so that case stays silent.
+   */
+  async function returnToControlledTab(): Promise<void> {
+    if (tabAffinity === null || tabAffinityReturnPending) return
+    setTabAffinityReturnPending(true)
+    try {
+      await api.returnToControlledTab(tabAffinity.revision)
+    } catch (cause) {
+      if (!(cause instanceof PanelRpcError && cause.code === 'stale-revision')) {
+        setError(cause instanceof Error ? cause.message : String(cause))
+      }
+    } finally {
+      setTabAffinityReturnPending(false)
+    }
+  }
+
   function addTrustedOrigin(): void {
     const origin = normalizeWebOrigin(trustedOriginInput)
     if (origin === null) return
@@ -1902,7 +2456,10 @@ export function App(): React.JSX.Element {
   }
 
   // 状态栏只显示连接状态；快照上限是技术细节，在设置页说明（见 hint）。
-  const statusText = copy.status[state]
+  // Discovery can end in a confirmed miss; that is more useful than "未连接".
+  const statusText = state === 'stopped' && discovery === 'not-found'
+    ? copy.statusNotFound
+    : copy.status[state]
   const sessionMenuTitle = sessionTitle ?? copy.app.newSession
   const currentModelOption = sessionModels?.options.find((option) => (
     option.provider === sessionModels.current?.provider
@@ -1928,9 +2485,81 @@ export function App(): React.JSX.Element {
     }
     return groups
   })()
+  const reasoningOptions = currentModelOption?.efforts ?? []
+  const currentEffort = sessionModels?.current?.reasoningEffort
+  const currentEffortLabel = currentEffort === undefined
+    ? undefined
+    : (reasoningOptions.find((effort) => effort.id === currentEffort)?.name ?? currentEffort)
+  const modelChipLabel = `${currentModelLabel}${currentEffortLabel === undefined ? '' : ` · ${currentEffortLabel}`}`
+  const permissionOption = sessionPermissions?.options.find((option) => (
+    option.value === sessionPermissions.current
+  ))
+  const permissionChipLabel = sessionPermissions === null
+    ? copy.app.permissionControl
+    : permissionLabel(sessionPermissions.current, permissionOption, copy)
+  const defaultPermissionLabel = sessionPermissions === null
+    ? null
+    : permissionLabel(
+      sessionPermissions.defaultPreset,
+      sessionPermissions.options.find((option) => option.value === sessionPermissions.defaultPreset),
+      copy,
+    )
+  const slashQueryText = showSlashMenu ? slashQuery(input, caretRef.current) : null
+  const slashRows = (() => {
+    const entries = slashEntries(
+      commandDirectory?.commands ?? composerCatalogsRef.current.commands,
+      skillDirectory?.skills ?? composerCatalogsRef.current.skills,
+      localSlashEntries(copy),
+    )
+    return rankSlashEntries(entries, slashQueryText ?? '')
+  })()
+  // No directory yet, or a deferred Session's empty answer: the menu lists what
+  // the last real Session knew and says so.
+  const slashDirectoryProvisional = commandDirectory === null || commandDirectory.provisional
+  const slashActiveIndex = slashRows.length === 0 ? -1 : Math.min(slashIndex, slashRows.length - 1)
   const approvalDialog = !approvalReadyForSession(queuedApproval, sessionRef.current, sessionChanging)
     ? null
     : <ApprovalDialog request={queuedApproval!} onDecision={decideApproval} copy={copy} />
+  const permissionDialog = permissionConfirm === null
+    ? null
+    : (
+      <div className="approval-backdrop">
+        <section
+          className="approval-dialog"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="permission-confirm-title"
+        >
+          <div className="approval-rail" aria-hidden="true" />
+          <div className="approval-heading">
+            <span className="approval-shield"><ShieldIcon /></span>
+            <div>
+              <span className="eyebrow">{copy.app.permissionControl}</span>
+              <h2 id="permission-confirm-title">{copy.app.permissionConfirmTitle(permissionConfirm.label)}</h2>
+            </div>
+          </div>
+          <div className="approval-detail">
+            <span>{copy.app.permissionControl}</span>
+            <strong>{permissionConfirm.label}</strong>
+          </div>
+          <small className="approval-footnote">
+            {copy.app.permissionConfirmBody(permissionConfirm.label, permissionConfirm.preset)}
+          </small>
+          <div className="approval-actions">
+            <button className="deny" autoFocus onClick={() => setPermissionConfirm(null)}>
+              {copy.app.permissionConfirmCancel}
+            </button>
+            <button
+              className="allow"
+              disabled={permissionBusy}
+              onClick={() => { void applyPermissionPreset(permissionConfirm.preset) }}
+            >
+              {copy.app.permissionConfirmAccept}
+            </button>
+          </div>
+        </section>
+      </div>
+    )
 
   if (showSettings) {
     return (
@@ -1945,6 +2574,20 @@ export function App(): React.JSX.Element {
         <UpdateCard copy={copy.update} />
         <div className="settings-panel">
           <label>
+            <span>{copy.settings.language}</span>
+            <small>{copy.settings.languageHelp}</small>
+            <select
+              value={localePreference}
+              onChange={(event) => changeUiLocale(event.target.value as UiLocalePreference)}
+            >
+              <option value="auto">{copy.settings.languageAuto}</option>
+              <option value="en">{copy.settings.languageEnglish}</option>
+              <option value="zh">{copy.settings.languageChinese}</option>
+            </select>
+          </label>
+        </div>
+        <div className="settings-panel">
+          <label>
             <span>{copy.settings.bridgeAddress}</span>
             <small>{copy.settings.bridgeHelp}</small>
             <input
@@ -1953,6 +2596,52 @@ export function App(): React.JSX.Element {
               placeholder={copy.settings.bridgePlaceholder}
             />
           </label>
+          <div className="bridge-detection">
+            <div className="bridge-detection-actions">
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => { void runDetection() }}
+              >
+                {detecting ? copy.settings.detectCancel : copy.settings.detect}
+              </button>
+              <small>
+                {detectProgress === null
+                  ? copy.settings.detectHelp
+                  : copy.settings.detectProgress(detectProgress.done, detectProgress.total)}
+              </small>
+            </div>
+            {detectError === null ? null : <small className="settings-error">{detectError}</small>}
+            {detected.length > 0 ? (
+              <ul className="device-list">
+                {detected.map((instance) => {
+                  const current = bridgeAddress === instance.wsUrl
+                  return (
+                    <li key={instance.wsUrl}>
+                      <button
+                        type="button"
+                        className={current ? 'device-row current' : 'device-row'}
+                        title={copy.settings.detectPick}
+                        onClick={() => setSettings((prev) => prev === null ? prev : { ...prev, bridgeUrl: instance.wsUrl })}
+                      >
+                        <span className="device-address">{instance.wsUrl}</span>
+                        <span className="device-meta">
+                          {instance.sources.map((source) => copy.settings.detectSource[source]).join(' · ')}
+                          {instance.pid === undefined ? '' : ` · PID ${instance.pid}`}
+                          {current ? ` · ${copy.settings.detectCurrent}` : ''}
+                        </span>
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            ) : detectAttempted && !detecting ? (
+              <small className="settings-error">{copy.settings.detectEmpty}</small>
+            ) : null}
+            {bridgeAddress === null || state !== 'connected'
+              ? null
+              : <small className="device-connected">{copy.settings.detectConnected(bridgeAddress)}</small>}
+          </div>
           <label>
             <span>Token</span>
             <small>{copy.settings.tokenHelp}</small>
@@ -1993,6 +2682,34 @@ export function App(): React.JSX.Element {
             />
             <span className="setting-toggle-control" aria-hidden="true"><span /></span>
           </label>
+          <div className="setting-toggle-row">
+            <label className="setting-toggle">
+              <span className="setting-toggle-copy">
+                <strong>{copy.settings.allowDevTools}</strong>
+                <small>{copy.settings.allowDevToolsHelp}</small>
+                {/* The state belongs to this switch, so it reads as its detail
+                    line rather than as a setting of its own. */}
+                <small className={`devtools-status${hasDevToolsError(devToolsStatus) ? ' is-error' : ''}`}>
+                  {devToolsStatusText(devToolsStatus, copy)}
+                </small>
+              </span>
+              <input
+                className="setting-toggle-input"
+                type="checkbox"
+                disabled={devToolsStatus !== null && !devToolsStatus.supported}
+                checked={settings?.allowDevTools ?? false}
+                onChange={(event) => setSettings((current) => current === null
+                  ? current
+                  : { ...current, allowDevTools: event.target.checked })}
+              />
+              <span className="setting-toggle-control" aria-hidden="true"><span /></span>
+            </label>
+            {devToolsStatus?.attached === true && (
+              <button className="secondary" onClick={() => { void api.detachDevTools().catch(() => {}) }}>
+                {copy.settings.devToolsDetach}
+              </button>
+            )}
+          </div>
           <label className="setting-toggle">
             <span className="setting-toggle-copy">
               <strong>{copy.settings.approvalNotifications}</strong>
@@ -2190,7 +2907,13 @@ export function App(): React.JSX.Element {
           onStep={(direction) => changeUiScale(stepUiScale(uiScaleRef.current, direction))}
           onReset={() => changeUiScale(DEFAULT_UI_SCALE)} />
       )}
-      <TabAffinityBanner state={tabAffinity} copy={copy} onDecision={decideTabAffinity} />
+      <TabAffinityBanner
+        state={tabAffinity}
+        copy={copy}
+        onDecision={decideTabAffinity}
+        onReturn={returnToControlledTab}
+        returnPending={tabAffinityReturnPending}
+      />
       {showSessionPicker && (
         <section className="session-picker" aria-label={copy.app.sessions}>
           <div className="session-picker-head">
@@ -2293,8 +3016,69 @@ export function App(): React.JSX.Element {
         />
       )}
       {error !== null && <div className="error">{error}</div>}
+      {notice !== null && <div className="notice">{notice}</div>}
       <footer className="composer">
-        <div className="composer-box">
+        {showSlashMenu ? (
+          <div className="slash-menu" role="listbox" aria-label={copy.app.slashMenu} ref={slashMenuRef}>
+            {slashRows.length === 0 ? (
+              <div className="slash-menu-empty">{copy.app.slashEmpty}</div>
+            ) : (
+              ['command', 'skill', 'local'].map((kind) => {
+                const rows = slashRows
+                  .map((entry, index) => ({ entry, index }))
+                  .filter((row) => row.entry.kind === kind)
+                if (rows.length === 0) return null
+                return (
+                  <div className="slash-menu-group" role="group" key={kind}>
+                    <div className="slash-menu-group-title">
+                      {kind === 'command'
+                        ? copy.app.slashCommands
+                        : kind === 'skill' ? copy.app.slashSkills : copy.app.slashLocal}
+                    </div>
+                    {rows.map(({ entry, index }) => (
+                      <button
+                        key={`${entry.kind}:${entry.name}`}
+                        type="button"
+                        role="option"
+                        aria-selected={index === slashActiveIndex}
+                        className={index === slashActiveIndex ? 'slash-menu-row isActive' : 'slash-menu-row'}
+                        onMouseDown={(event) => {
+                          event.preventDefault()
+                          pickSlashEntry(entry)
+                        }}
+                      >
+                        <span className="slash-menu-name">/{entry.name}</span>
+                        <span className="slash-menu-detail">{entry.description}</span>
+                        {entry.userOnly ? (
+                          <span className="slash-menu-badge">{copy.app.slashUserOnly}</span>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
+                )
+              })
+            )}
+            {slashDirectoryProvisional ? (
+              <div className="slash-menu-footnote">{copy.app.slashProvisional}</div>
+            ) : null}
+          </div>
+        ) : null}
+        <div
+          className="composer-box"
+          onDragOver={(event) => {
+            if (event.dataTransfer.types.includes('Files')) event.preventDefault()
+          }}
+          onDrop={(event) => {
+            const files = [...event.dataTransfer.files].filter((file) => file.type.startsWith('image/'))
+            if (files.length === 0) return
+            event.preventDefault()
+            if (imageLimits === null) {
+              setError(copy.app.imageUnavailable)
+              return
+            }
+            void addImageFiles(files)
+          }}
+        >
           {selection !== null && (
             <SelectionQuote
               selection={{ ...selection, quote: selection.text }}
@@ -2329,13 +3113,50 @@ export function App(): React.JSX.Element {
             value={input}
             onChange={(e) => {
               if (!sendingRef.current) setDraft((current) => ({ ...current, text: e.target.value }))
+              const caret = e.target.selectionStart ?? e.target.value.length
+              caretRef.current = caret
+              setShowSlashMenu(slashQuery(e.target.value, caret) !== null)
+              setSlashIndex(0)
             }}
             onKeyDown={(e) => {
               // isComposing：输入法组词中的回车是确认选字，不是发送。
-              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+              if (e.nativeEvent.isComposing) return
+              if (showSlashMenu && slashRows.length > 0) {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault()
+                  setSlashIndex((index) => (index + 1) % slashRows.length)
+                  return
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault()
+                  setSlashIndex((index) => (index - 1 + slashRows.length) % slashRows.length)
+                  return
+                }
+                if (e.key === 'Escape' || (e.key === 'Tab' && e.shiftKey)) {
+                  e.preventDefault()
+                  setShowSlashMenu(false)
+                  return
+                }
+                if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+                  e.preventDefault()
+                  acceptSlashMenu()
+                  return
+                }
+              }
+              if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
                 void send()
               }
+            }}
+            onPaste={(e) => {
+              const files = transferredImageFiles(e.clipboardData)
+              if (files.length === 0) return
+              e.preventDefault()
+              if (imageLimits === null) {
+                setError(copy.app.imageUnavailable)
+                return
+              }
+              void addImageFiles(files)
             }}
             placeholder={state === 'connected' ? copy.app.connectedPlaceholder : copy.app.disconnectedPlaceholder}
             disabled={!sessionReady || busy}
@@ -2386,52 +3207,151 @@ export function App(): React.JSX.Element {
           </div>
         </div>
         {state === 'connected' ? (
-          <div className="composer-model" ref={modelPickerRef}>
-            <button
-              type="button"
-              className="composer-model-trigger"
-              aria-expanded={showModelPicker}
-              aria-haspopup="listbox"
-              aria-label={copy.app.selectModel}
-              title={currentModelLabel}
-              disabled={!sessionReady || busy || addingImages || modelSelecting || working
-                || sessionModels === null || sessionModels.options.length === 0}
-              onClick={() => setShowModelPicker((open) => !open)}
-            >
-              <span>{currentModelLabel}</span>
-              <ChevronDownIcon />
-            </button>
-            {showModelPicker && sessionModels !== null && sessionModels.options.length > 0 ? (
-              <div className="composer-model-menu" role="listbox" aria-label={copy.app.selectModel}>
-                {modelMenuGroups.map((group) => (
-                  <div key={group.provider} className="composer-model-group" role="group" aria-label={group.providerName}>
-                    {modelMenuGroups.length > 1 ? (
-                      <div className="composer-model-group-title">{group.providerName}</div>
-                    ) : null}
-                    {group.models.map((option) => {
-                      const selected = sessionModels.current?.provider === option.provider
-                        && sessionModels.current.model === option.id
-                      return (
+          <div className="composer-controls">
+            <div className="composer-chip" ref={permissionPickerRef}>
+              <button
+                type="button"
+                className="composer-chip-trigger"
+                aria-expanded={showPermissionPicker}
+                aria-haspopup="listbox"
+                aria-label={copy.app.permissionControl}
+                title={permissionChipLabel}
+                disabled={!sessionReady || permissionBusy || sessionPermissions === null
+                  || !sessionPermissions.routable}
+                onClick={() => {
+                  setShowPermissionPicker((open) => !open)
+                  setShowModelPicker(false)
+                  setPermissionError(null)
+                }}
+              >
+                <span>{permissionChipLabel}</span>
+                <ChevronDownIcon />
+              </button>
+              {showPermissionPicker && sessionPermissions !== null ? (
+                <div className="composer-chip-menu" role="listbox" aria-label={copy.app.permissionMenu}>
+                  {!sessionPermissions.options.some((option) => option.value === sessionPermissions.current) ? (
+                    <button type="button" role="option" aria-selected disabled className="isSelected">
+                      <span>{permissionChipLabel}</span>
+                    </button>
+                  ) : null}
+                  {sessionPermissions.options.map((option) => {
+                    const selected = option.value === sessionPermissions.current
+                    const label = permissionLabel(option.value, option, copy)
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        role="option"
+                        aria-selected={selected}
+                        className={selected ? 'isSelected' : undefined}
+                        title={option.description ?? label}
+                        onClick={() => requestPermissionPreset(option.value, label)}
+                      >
+                        <span>{label}</span>
+                        {isExperimentalPreset(option.value)
+                          ? <span className="preset-badge">{copy.app.permissionExperimental}</span>
+                          : null}
+                      </button>
+                    )
+                  })}
+                  {sessionPermissions.provisional ? (
+                    <div className="chip-menu-footnote">{copy.app.permissionPendingHint}</div>
+                  ) : null}
+                  {defaultPermissionLabel !== null && !sessionPermissions.provisional ? (
+                    <div className="chip-menu-footnote">
+                      {copy.app.permissionDefaultHint(defaultPermissionLabel)}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+            <div className="composer-model" ref={modelPickerRef}>
+              <button
+                type="button"
+                className="composer-chip-trigger"
+                aria-expanded={showModelPicker}
+                aria-haspopup="listbox"
+                aria-label={copy.app.selectModel}
+                title={modelChipLabel}
+                disabled={!sessionReady || addingImages || modelSelecting
+                  || sessionModels === null || sessionModels.options.length === 0}
+                onClick={() => {
+                  setShowModelPicker((open) => !open)
+                  setShowPermissionPicker(false)
+                }}
+              >
+                <span>{modelChipLabel}</span>
+                <ChevronDownIcon />
+              </button>
+              {showModelPicker && sessionModels !== null && sessionModels.options.length > 0 ? (
+                <div className="composer-model-menu" role="listbox" aria-label={copy.app.selectModel}>
+                  {modelMenuGroups.map((group) => (
+                    <div key={group.provider} className="composer-model-group" role="group" aria-label={group.providerName}>
+                      {modelMenuGroups.length > 1 ? (
+                        <div className="composer-model-group-title">{group.providerName}</div>
+                      ) : null}
+                      {group.models.map((option) => {
+                        const selected = sessionModels.current?.provider === option.provider
+                          && sessionModels.current.model === option.id
+                        return (
+                          <button
+                            key={`${option.provider}:${option.id}`}
+                            type="button"
+                            role="option"
+                            aria-selected={selected}
+                            className={selected ? 'isSelected' : undefined}
+                            title={`${option.providerName} · ${option.name}`}
+                            onClick={() => { void selectSessionModel(option) }}
+                          >
+                            <span>{option.name}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  ))}
+                  {currentModelOption !== undefined && reasoningOptions.length > 0 ? (
+                    <div className="composer-model-group" role="group" aria-label={copy.app.modelReasoning}>
+                      <div className="composer-model-group-title">{copy.app.modelReasoning}</div>
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={sessionModels.current?.reasoningEffort === undefined}
+                        className={sessionModels.current?.reasoningEffort === undefined ? 'isSelected' : undefined}
+                        onClick={() => { void selectReasoningEffort(currentModelOption, undefined) }}
+                      >
+                        <span>{copy.app.modelReasoningDefault}</span>
+                      </button>
+                      {reasoningOptions.map((effort) => (
                         <button
-                          key={`${option.provider}:${option.id}`}
+                          key={effort.id}
                           type="button"
                           role="option"
-                          aria-selected={selected}
-                          className={selected ? 'isSelected' : undefined}
-                          title={`${option.providerName} · ${option.name}`}
-                          onClick={() => { void selectSessionModel(option) }}
+                          aria-selected={sessionModels.current?.reasoningEffort === effort.id}
+                          className={sessionModels.current?.reasoningEffort === effort.id ? 'isSelected' : undefined}
+                          onClick={() => { void selectReasoningEffort(currentModelOption, effort.id) }}
                         >
-                          <span>{option.name}</span>
+                          <span>{effort.name}</span>
                         </button>
-                      )
-                    })}
-                  </div>
-                ))}
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+            {permissionError !== null ? (
+              <div className="composer-chip-note">{permissionError}</div>
+            ) : null}
+            {sessionModels !== null && sessionModels.options.length === 0 ? (
+              <div className="composer-chip-note">
+                <span>{sessionModels.error ?? copy.app.modelUnavailable}</span>
+                <button type="button" onClick={() => { void refreshComposerDirectories() }}>
+                  {copy.app.retry}
+                </button>
               </div>
             ) : null}
           </div>
         ) : null}
       </footer>
-    </div>{approvalDialog}</>
+    </div>{permissionDialog}{approvalDialog}</>
   )
 }

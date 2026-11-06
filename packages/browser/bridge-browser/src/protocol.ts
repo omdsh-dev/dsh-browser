@@ -18,6 +18,24 @@ export const BRIDGE_PATH = '/ext/bridge'
 /** Zero-config discovery endpoint: returns `{ wsUrl }` for the extension. */
 export const BRIDGE_CONFIG_PATH = '/ext/bridge-config'
 
+/**
+ * Fixed loopback ports the plugin's discovery beacon tries, in order.
+ *
+ * DSH Desktop launches its host with `--port 0`, so every launch lands on a
+ * different OS-assigned port and no fixed list of real ports can find it. The
+ * beacon binds the first free port of this range and answers
+ * {@link BRIDGE_CONFIG_PATH} with the real bridge URL, which turns discovery
+ * into a handful of bounded probes. 43189 is the port older deployment notes
+ * already recommended pinning by hand.
+ */
+export const BEACON_PORTS = [43189, 43190, 43191, 43192, 43193, 43194, 43195, 43196, 43197, 43198] as const
+
+/**
+ * Ports a local dsh may serve on without the beacon: the CLI default and the
+ * ports operators historically picked. Probed after any remembered URL.
+ */
+export const LEGACY_BRIDGE_PORTS = [3080, 3081, 3090, 14389] as const
+
 /** Internal RPC used after an explicit tab handoff to seed the Agent's next step. */
 export const BRIDGE_INJECT_BROWSER_SNAPSHOT_METHOD = 'bridge.injectBrowserSnapshot'
 
@@ -48,6 +66,8 @@ export type ToolErrorCode =
   | 'bridge-closed'
   | 'bad-args'
   | 'internal'
+  /** The platform has no trustworthy input channel (no `chrome.debugger`). */
+  | 'input-unavailable'
 
 /** One tool-call failure: stable machine code plus human text for the model. */
 export interface ToolError {
@@ -60,6 +80,16 @@ export type RespondResult =
   | { ok: true; value?: unknown }
   | { ok: false; error: { code: string; message: string; details: Record<string, unknown> } }
 
+/**
+ * Developer-tools capability the extension advertises when it can drive a
+ * debugger session (Chrome only: `chrome.debugger`). Absent for platforms and
+ * builds without it, which keeps the devtools tools unregistered there.
+ */
+export interface DevToolsCaps {
+  /** Wire version of the devtools tool group. */
+  version: typeof DEVTOOLS_CAPS_VERSION
+}
+
 /** Capabilities negotiated in `hello`/`hello.ok`. The extension performs its own actions; these bounds shape page snapshots. */
 export interface BridgeCaps {
   /** The extension renders page state as text only (no screenshots). */
@@ -68,7 +98,28 @@ export interface BridgeCaps {
   snapshotMaxChars: number
   /** Upper bound on interactive inventory items per snapshot (plugin config). */
   maxInteractiveItems: number
+  /** Present only when the connected extension supports the developer-tools group. */
+  devTools?: DevToolsCaps
 }
+
+/** Version of the developer-tools tool group this plugin speaks. */
+export const DEVTOOLS_CAPS_VERSION = 1
+
+/**
+ * The developer-tools group's wire action names (tool name == action name).
+ * Registered only while the connected extension advertises `caps.devTools`.
+ */
+export const DEVTOOLS_TOOL_NAMES = [
+  'browser_devtools_elements',
+  'browser_devtools_set_element_style',
+  'browser_devtools_set_element_attribute',
+  'browser_console_eval',
+  'browser_console_logs',
+  'browser_devtools_network',
+  'browser_devtools_list_requests',
+  'browser_devtools_get_request',
+  'browser_devtools_request_body',
+] as const
 
 /** Frames sent by the extension to the bridge plugin. */
 export type ClientFrame =
@@ -235,6 +286,14 @@ function isCaps(value: unknown): value is BridgeCaps {
     && Number.isInteger(caps.snapshotMaxChars)
     && caps.snapshotMaxChars >= MIN_SNAPSHOT_MAX_CHARS
     && typeof caps.maxInteractiveItems === 'number' && caps.maxInteractiveItems > 0
+    // Optional: an older extension omits it and simply gets no devtools tools.
+    && (caps.devTools === undefined || isDevToolsCaps(caps.devTools))
+}
+
+/** Validate the optional developer-tools capability; unknown versions are unusable. */
+export function isDevToolsCaps(value: unknown): value is DevToolsCaps {
+  return typeof value === 'object' && value !== null
+    && (value as Record<string, unknown>).version === DEVTOOLS_CAPS_VERSION
 }
 
 function isToolError(value: unknown): value is ToolError {
@@ -261,4 +320,88 @@ function isRespondError(value: unknown): value is Extract<RespondResult, { ok: f
     && typeof (value as Record<string, unknown>).details === 'object'
     && (value as Record<string, unknown>).details !== null
     && !Array.isArray((value as Record<string, unknown>).details)
+}
+
+/**
+ * Answer of the discovery endpoint ({@link BRIDGE_CONFIG_PATH}), served by the
+ * host route and by the fixed-port beacon.
+ *
+ * `pid` and `startedAt` are optional instance metadata: the extension's
+ * instance picker shows them, and an older plugin simply omits them.
+ */
+export interface BridgeConfigPayload {
+  /** Bridge WebSocket URL the extension should open. */
+  wsUrl: string
+  /** Set when a fixed-port discovery beacon (not the host route) answered. */
+  beacon?: true
+  /** Host process id, for telling several local instances apart. */
+  pid?: number
+  /** Host start time as an ISO 8601 string. */
+  startedAt?: string
+}
+
+/** Instance metadata the discovery endpoints advertise. */
+export interface BridgeInstanceInfo {
+  pid?: number
+  startedAt?: string
+}
+
+/**
+ * Build a discovery answer naming the host's real bridge URL.
+ * @param hostPort - port the host webserver actually bound.
+ * @param info - optional instance metadata.
+ * @param beacon - mark the answer as coming from a beacon.
+ * @returns the payload to serialize.
+ */
+export function bridgeConfigPayload(
+  hostPort: number,
+  info: BridgeInstanceInfo = {},
+  beacon = false,
+): BridgeConfigPayload {
+  return {
+    wsUrl: `ws://127.0.0.1:${String(hostPort)}${BRIDGE_PATH}`,
+    ...(beacon ? { beacon: true as const } : {}),
+    ...(info.pid === undefined ? {} : { pid: info.pid }),
+    ...(info.startedAt === undefined ? {} : { startedAt: info.startedAt }),
+  }
+}
+
+/**
+ * Whether a URL names the local bridge: `ws:` on a loopback host with the
+ * bridge path. Discovered answers must satisfy this, so a stray local service
+ * that happens to answer the path cannot send the extension off-machine.
+ */
+export function isLoopbackBridgeUrl(url: string): boolean {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return false
+  }
+  if (parsed.protocol !== 'ws:') return false
+  const hostname = parsed.hostname.toLowerCase()
+  const loopback = hostname === '127.0.0.1'
+    || hostname === 'localhost'
+    || hostname === '[::1]'
+    || hostname === '::1'
+  return loopback && parsed.pathname === BRIDGE_PATH
+}
+
+/**
+ * Parse a discovery answer. Unknown fields are ignored and instance metadata
+ * is only kept when well formed; an answer that does not name the local bridge
+ * is rejected outright.
+ * @param value - parsed JSON body of the discovery response.
+ * @returns the normalized payload, or `undefined` when it is not usable.
+ */
+export function parseBridgeConfigPayload(value: unknown): BridgeConfigPayload | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const body = value as Record<string, unknown>
+  if (typeof body.wsUrl !== 'string' || !isLoopbackBridgeUrl(body.wsUrl)) return undefined
+  return {
+    wsUrl: body.wsUrl,
+    ...(body.beacon === true ? { beacon: true as const } : {}),
+    ...(typeof body.pid === 'number' && Number.isInteger(body.pid) && body.pid > 0 ? { pid: body.pid } : {}),
+    ...(typeof body.startedAt === 'string' && body.startedAt !== '' ? { startedAt: body.startedAt } : {}),
+  }
 }

@@ -284,4 +284,188 @@ describe('withSessionDeferral', () => {
     expect(sessionHistory).toHaveBeenCalledOnce()
     expect(withSessionDeferral(api, false)).toBe(api)
   })
+
+  const permissionCatalog = {
+    options: [
+      { value: 'read-only', name: 'Read Only' },
+      { value: 'workspace-write', name: 'Workspace Write' },
+      { value: 'danger-full-access', name: 'Full access' },
+    ],
+    defaultOptions: [
+      { value: 'read-only', name: 'Read Only' },
+      { value: 'workspace-write', name: 'Workspace Write' },
+    ],
+    defaultPreset: 'workspace-write',
+  }
+
+  function composerHarness(
+    setPermission: (call: HostRpcCall) => Promise<HostRpcResult> = async (call: HostRpcCall) => ({
+      ok: true,
+      value: {
+        preset: (call.payload as { preset: string }).preset,
+        commandId: 'command-1',
+        result: { kind: 'success' },
+      },
+    }),
+  ) {
+    const harness = apiHarness()
+    const applied = vi.fn(setPermission)
+    const original = harness.call.getMockImplementation()!
+    harness.call.mockImplementation(async (call: HostRpcCall): Promise<HostRpcResult> => {
+      if (call.method === 'permission.catalog') return { ok: true, value: permissionCatalog }
+      if (call.method === 'session.setPermission') return applied(call)
+      return original(call)
+    })
+    return { ...harness, applied }
+  }
+
+  it('answers a provisional permission directory and defers the preset switch', async () => {
+    const { api, applied } = composerHarness()
+    const wrapped = withSessionDeferral(api, true)
+    const id = await provisionalId(wrapped)
+
+    await expect(wrapped.call(request('session.permissions', { sessionId: id }))).resolves.toEqual({
+      ok: true,
+      value: {
+        current: 'workspace-write',
+        routable: true,
+        provisional: true,
+        options: permissionCatalog.options,
+        defaultOptions: permissionCatalog.defaultOptions,
+        defaultPreset: 'workspace-write',
+      },
+    })
+
+    await expect(wrapped.call(request('session.setPermission', { sessionId: id, preset: 'danger-full-access' })))
+      .resolves.toEqual({
+        ok: true,
+        value: { preset: 'danger-full-access', provisional: true, result: { kind: 'success' } },
+      })
+    expect(applied).not.toHaveBeenCalled()
+
+    // The pending choice is what the next turn will run under.
+    await expect(wrapped.call(request('session.permissions', { sessionId: id }))).resolves.toMatchObject({
+      ok: true,
+      value: { current: 'danger-full-access', provisional: true },
+    })
+
+    await wrapped.call(request('session.prompt', { sessionId: id, mode: 'queue', content: [] }, 'prompt'))
+    expect(applied).toHaveBeenCalledWith(expect.objectContaining({
+      method: 'session.setPermission',
+      payload: { sessionId: id, preset: 'danger-full-access' },
+    }))
+  })
+
+  it('applies the deferred preset before the deferred model choice', async () => {
+    const order: string[] = []
+    const { api, call, applied } = composerHarness(async (request: HostRpcCall) => {
+      order.push(request.method)
+      return { ok: true, value: { preset: (request.payload as { preset: string }).preset } }
+    })
+    const original = call.getMockImplementation()!
+    call.mockImplementation(async (request: HostRpcCall): Promise<HostRpcResult> => {
+      if (request.method === 'session.selectModel') {
+        order.push(request.method)
+        return { ok: true, value: { selected: request.payload } }
+      }
+      return original(request)
+    })
+    const wrapped = withSessionDeferral(api, true)
+    const id = await provisionalId(wrapped)
+    await wrapped.call(request('session.setPermission', { sessionId: id, preset: 'read-only' }))
+    await wrapped.call(request('session.selectModel', { sessionId: id, provider: 'p', model: 'm' }))
+
+    await wrapped.call(request('session.prompt', { sessionId: id }, 'prompt'))
+
+    expect(applied).toHaveBeenCalledOnce()
+    expect(order).toEqual(['session.setPermission', 'session.selectModel'])
+  })
+
+  it('rejects an unknown provisional preset without recording it', async () => {
+    const { api, applied } = composerHarness()
+    const wrapped = withSessionDeferral(api, true)
+    const id = await provisionalId(wrapped)
+
+    await expect(wrapped.call(request('session.setPermission', { sessionId: id, preset: 'custom' })))
+      .resolves.toEqual({
+        ok: false,
+        error: { code: 'bad-request', message: 'unknown permission preset "custom"', details: {} },
+      })
+    await expect(wrapped.call(request('session.permissions', { sessionId: id }))).resolves.toMatchObject({
+      ok: true, value: { current: 'workspace-write' },
+    })
+    expect(applied).not.toHaveBeenCalled()
+  })
+
+  it('blocks the first prompt when the deferred preset cannot be applied', async () => {
+    const failure = {
+      ok: false as const,
+      error: { code: 'gateway/context-not-found', message: 'no agent', details: {} },
+    }
+    const { api, applied, sessionPrompt } = composerHarness(async () => failure)
+    const wrapped = withSessionDeferral(api, true)
+    const id = await provisionalId(wrapped)
+    await wrapped.call(request('session.setPermission', { sessionId: id, preset: 'read-only' }))
+
+    await expect(wrapped.call(request('session.prompt', { sessionId: id }, 'first'))).resolves.toEqual(failure)
+    expect(sessionPrompt).not.toHaveBeenCalled()
+
+    // The choice survives for the retry.
+    applied.mockResolvedValueOnce({ ok: true, value: { preset: 'read-only' } })
+    await expect(wrapped.call(request('session.prompt', { sessionId: id }, 'retry')))
+      .resolves.toEqual({ ok: true, value: { accepted: true } })
+  })
+
+  it('answers empty command and skill directories for a provisional id', async () => {
+    const { api, call } = composerHarness()
+    const wrapped = withSessionDeferral(api, true)
+    const id = await provisionalId(wrapped)
+
+    await expect(wrapped.call(request('commands.list', { sessionId: id })))
+      .resolves.toEqual({ ok: true, value: { commands: [], provisional: true } })
+    await expect(wrapped.call(request('skills.list', { sessionId: id })))
+      .resolves.toEqual({ ok: true, value: { skills: [], provisional: true } })
+    expect(call.mock.calls.filter(([request]) => request.method === 'commands.list')).toHaveLength(0)
+    expect(call.mock.calls.filter(([request]) => request.method === 'skills.list')).toHaveLength(0)
+  })
+
+  it('treats a /permission line as the provisional preset switch and refuses other commands', async () => {
+    const { api, applied } = composerHarness()
+    const wrapped = withSessionDeferral(api, true)
+    const id = await provisionalId(wrapped)
+
+    await expect(wrapped.call(request('commands.execute', { sessionId: id, line: '/permission read-only' })))
+      .resolves.toEqual({
+        ok: true,
+        value: { preset: 'read-only', provisional: true, result: { kind: 'success' } },
+      })
+    await expect(wrapped.call(request('commands.execute', { sessionId: id, line: '/compact' })))
+      .resolves.toEqual({
+        ok: false,
+        error: {
+          code: 'provisional-session',
+          message: 'this command needs a real session: send the first message to create it',
+          details: {},
+        },
+      })
+    await wrapped.call(request('session.prompt', { sessionId: id }, 'prompt'))
+    expect(applied).toHaveBeenCalledWith(expect.objectContaining({
+      payload: { sessionId: id, preset: 'read-only' },
+    }))
+  })
+
+  it('passes composer methods through once the id is no longer provisional', async () => {
+    const { api, call } = composerHarness()
+    call.mockImplementation(async (request: HostRpcCall): Promise<HostRpcResult> => (
+      request.method === 'session.prompt'
+        ? { ok: true, value: { accepted: true } }
+        : { ok: true, value: { passedThrough: request.method } }
+    ))
+    const wrapped = withSessionDeferral(api, true)
+
+    await expect(wrapped.call(request('commands.execute', { sessionId: 'session-real', line: '/compact' })))
+      .resolves.toEqual({ ok: true, value: { passedThrough: 'commands.execute' } })
+    await expect(wrapped.call(request('session.permissions', { sessionId: 'session-real' })))
+      .resolves.toEqual({ ok: true, value: { passedThrough: 'session.permissions' } })
+  })
 })

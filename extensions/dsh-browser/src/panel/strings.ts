@@ -4,6 +4,8 @@ import type { UiLocale } from '../i18n.ts'
 export interface PanelCopy {
   documentTitle: string
   status: Record<BridgeState, string>
+  /** Status shown when the startup pass found no local dsh at all. */
+  statusNotFound: string
   approval: {
     eyebrow: string
     readTitle: string
@@ -15,8 +17,11 @@ export interface PanelCopy {
     allowOnce: string
     alwaysAllowReads: string
     trustSession: string
+    devToolsTitle: string
+    trustDevTools: string
     readFootnote: string
     actionFootnote: string
+    devToolsFootnote: string
   }
   tool: {
     running: string
@@ -38,6 +43,8 @@ export interface PanelCopy {
     keep: string
     keepAlways: string
     follow: string
+    /** Move the user's own tab back to the page the assistant is bound to. */
+    returnToAssistant: string
     backgroundTitle: (controlled: string) => string
     backgroundBody: (active: string) => string
     pinnedBody: (active: string) => string
@@ -62,9 +69,23 @@ export interface PanelCopy {
     back: string
     eyebrow: string
     title: string
+    language: string
+    languageHelp: string
+    languageAuto: string
+    languageEnglish: string
+    languageChinese: string
     bridgeAddress: string
     bridgeHelp: string
     bridgePlaceholder: string
+    detect: string
+    detectCancel: string
+    detectHelp: string
+    detectProgress: (done: number, total: number) => string
+    detectEmpty: string
+    detectPick: string
+    detectCurrent: string
+    detectConnected: (address: string) => string
+    detectSource: Record<'fixed' | 'beacon', string>
     tokenHelp: string
     tokenPlaceholder: string
     pageSharing: string
@@ -74,6 +95,14 @@ export interface PanelCopy {
     sharingOff: string
     unrestrictedBrowserAccess: string
     unrestrictedBrowserAccessHelp: string
+    allowDevTools: string
+    allowDevToolsHelp: string
+    devToolsUnsupported: string
+    devToolsOff: string
+    devToolsIdle: string
+    devToolsAttached: string
+    devToolsError: string
+    devToolsDetach: string
     approvalNotifications: string
     approvalNotificationsHelp: string
     autoResumeSession: string
@@ -210,6 +239,39 @@ export interface PanelCopy {
     selectionTruncated: string
     removeSelection: string
     scrollToBottom: string
+    permissionControl: string
+    permissionMenu: string
+    permissionReadOnly: string
+    permissionWorkspaceWrite: string
+    permissionFullAccess: string
+    permissionAuto: string
+    permissionCustom: string
+    permissionExperimental: string
+    permissionPendingHint: string
+    permissionDefaultHint: (name: string) => string
+    permissionConfirmTitle: (label: string) => string
+    permissionConfirmBody: (label: string, preset: string) => string
+    permissionConfirmAccept: string
+    permissionConfirmCancel: string
+    permissionSwitchFailed: (reason: string) => string
+    permissionUnavailable: string
+    modelUnavailable: string
+    modelReasoning: string
+    modelReasoningDefault: string
+    retry: string
+    slashMenu: string
+    slashCommands: string
+    slashSkills: string
+    slashLocal: string
+    slashUserOnly: string
+    slashLocalModel: string
+    slashEmpty: string
+    slashProvisional: string
+    unknownCommand: (name: string) => string
+    commandFailed: (reason: string) => string
+    commandSucceeded: string
+    commandProvisional: string
+    commandAttachmentsUnsupported: string
   }
 }
 
@@ -221,6 +283,7 @@ const EN: PanelCopy = {
     reconnecting: 'Reconnecting…',
     stopped: 'Disconnected',
   },
+  statusNotFound: 'No service found',
   approval: {
     eyebrow: 'Security check',
     readTitle: 'Allow page access?',
@@ -232,8 +295,11 @@ const EN: PanelCopy = {
     allowOnce: 'Allow once',
     alwaysAllowReads: 'Always allow reads',
     trustSession: 'Trust this domain for this session',
+    devToolsTitle: 'Allow developer tools?',
+    trustDevTools: 'Trust developer tools for this session',
     readFootnote: 'Esc to deny · You can disable automatic reading in Settings at any time',
     actionFootnote: 'Esc to deny · Temporary trust ends when the side panel closes · Typed content is never shown',
+    devToolsFootnote: 'Developer tools expose page internals and captured traffic. Trust here lasts until the side panel closes. Chrome blocks its own DevTools while this runs.',
   },
   tool: {
     running: 'Working on page',
@@ -257,6 +323,15 @@ const EN: PanelCopy = {
       browser_reload: 'Reload page',
       browser_get_text: 'Extract text',
       browser_wait: 'Wait for page',
+      browser_devtools_elements: 'Inspect element',
+      browser_devtools_set_element_style: 'Edit element CSS',
+      browser_devtools_set_element_attribute: 'Edit element attribute',
+      browser_console_eval: 'Run page JavaScript',
+      browser_console_logs: 'Read page console',
+      browser_devtools_network: 'Control network capture',
+      browser_devtools_list_requests: 'List network requests',
+      browser_devtools_get_request: 'Read request detail',
+      browser_devtools_request_body: 'Read request body',
     },
     overflow: (shown, total) => `${shown.join(' → ')} → ${total - shown.length} more`,
   },
@@ -268,14 +343,15 @@ const EN: PanelCopy = {
     closedTab: 'Closed tab',
     questionTitle: 'Follow your current page?',
     questionBody: (controlled, active) => `It is still bound to “${controlled}”, while you moved to “${active}”. Browser actions are paused until you choose.`,
-    keep: 'Stay on original',
-    keepAlways: 'Stay & stop asking',
-    follow: 'Follow current page',
+    keep: 'Assistant stays on the original page',
+    keepAlways: 'Assistant stays & stop asking',
+    follow: 'Assistant follows the current page',
+    returnToAssistant: 'Jump back to the assistant page',
     backgroundTitle: () => 'Assistant stays on the original page',
     backgroundBody: (active) => `You are viewing “${active}”. Future browser actions still run on the original page.`,
     pinnedBody: (active) => `You are viewing “${active}”. Future browser actions still run on the original page, and switching tabs will not ask again.`,
     askAgain: 'Ask on tab switch',
-    followCurrent: 'Follow current page',
+    followCurrent: 'Follow the current page',
     lostTitle: 'The controlled tab was closed',
     lostBody: 'Browser actions are paused to avoid operating the wrong page.',
     useCurrent: 'Use current page',
@@ -295,9 +371,23 @@ const EN: PanelCopy = {
     back: 'Back to chat',
     eyebrow: 'Browser assistant',
     title: 'Settings',
+    language: 'Language',
+    languageHelp: 'Language of the assistant panel and its notifications. Takes effect immediately.',
+    languageAuto: 'Automatic (follow Chrome)',
+    languageEnglish: 'English',
+    languageChinese: '中文',
     bridgeAddress: 'Bridge address',
     bridgeHelp: 'Leave blank to detect a local service automatically',
-    bridgePlaceholder: 'Auto-detect 3080 / 3081 / 3090 / 14389 / 43189',
+    bridgePlaceholder: 'Auto-detect (desktop beacon 43189–43198 included)',
+    detect: 'Detect',
+    detectCancel: 'Cancel',
+    detectHelp: 'Probes this machine once and lists every local dsh instance.',
+    detectProgress: (done, total) => `Detecting ${done} / ${total} ports…`,
+    detectEmpty: 'No service found.',
+    detectPick: 'Select an instance to fill in its address.',
+    detectCurrent: 'in use',
+    detectConnected: (address) => `Connected to ${address}`,
+    detectSource: { fixed: 'fixed port', beacon: 'beacon' },
     tokenHelp: 'Required by Firefox and remote deployments',
     tokenPlaceholder: 'Required for Firefox / remote deployments',
     pageSharing: 'Page content sharing',
@@ -307,6 +397,14 @@ const EN: PanelCopy = {
     sharingOff: 'Off',
     unrestrictedBrowserAccess: 'Allow unrestricted browser control',
     unrestrictedBrowserAccessHelp: 'Let the model read every HTTP(S) page, inspect all open tab titles and URLs, and perform actions—including following and closing tabs—without confirmation. Browser-protected page content remains inaccessible.',
+    allowDevTools: 'Allow developer tools',
+    allowDevToolsHelp: 'High privilege: lets the model inspect and modify page elements and CSS, run JavaScript in the page, and read captured network requests. Off by default, where every call asks for approval. Chrome cannot keep its own DevTools open on a tab while this is attached.',
+    devToolsUnsupported: 'Unavailable — this browser does not provide the debugger API.',
+    devToolsOff: 'Off — every call asks for approval.',
+    devToolsIdle: 'Enabled — the debugger attaches on the first call.',
+    devToolsAttached: 'Debugger attached',
+    devToolsError: 'Last error:',
+    devToolsDetach: 'Detach now',
     approvalNotifications: 'Browser approval notifications',
     approvalNotificationsHelp: 'Notify you when an approval arrives while the side panel is closed',
     autoResumeSession: "Resume this page's conversation",
@@ -443,6 +541,41 @@ const EN: PanelCopy = {
     selectionTruncated: '(truncated)',
     removeSelection: 'Remove the selected text',
     scrollToBottom: 'Scroll to latest',
+    permissionControl: 'Permission preset',
+    permissionMenu: 'Permission presets',
+    permissionReadOnly: 'Read only',
+    permissionWorkspaceWrite: 'Workspace edits',
+    permissionFullAccess: 'Full access',
+    permissionAuto: 'Auto review',
+    permissionCustom: 'Custom',
+    permissionExperimental: 'EXP',
+    permissionPendingHint: 'Applies when the first message creates this chat',
+    permissionDefaultHint: (name) => `New chats start from ${name}`,
+    permissionConfirmTitle: (label) => `Switch to ${label}?`,
+    permissionConfirmBody: (label, preset) => preset === 'danger-full-access'
+      ? `Full access runs file and command operations without asking for approval. Only continue if you trust this conversation (${label}).`
+      : `Auto review is experimental: a separate reviewer judges each risky call. Only continue if you accept that risk (${label}).`,
+    permissionConfirmAccept: 'Switch',
+    permissionConfirmCancel: 'Cancel',
+    permissionSwitchFailed: (reason) => `Could not switch the permission preset: ${reason}`,
+    permissionUnavailable: 'This dsh host does not expose permission presets',
+    modelUnavailable: 'Could not load the model list',
+    modelReasoning: 'Reasoning effort',
+    modelReasoningDefault: 'Default',
+    retry: 'Retry',
+    slashMenu: 'Commands and skills',
+    slashCommands: 'Commands',
+    slashSkills: 'Skills',
+    slashLocal: 'This panel',
+    slashUserOnly: 'User only',
+    slashLocalModel: 'Choose the model for the next turn',
+    slashEmpty: 'No matching command or skill',
+    slashProvisional: 'Available once the first message creates this chat',
+    unknownCommand: (name) => `/${name} is not a command or skill, so it was not sent. Start the line with a space to send it as text.`,
+    commandFailed: (reason) => `Command failed: ${reason}`,
+    commandSucceeded: 'Command finished',
+    commandProvisional: 'This command needs a real chat: send the first message first',
+    commandAttachmentsUnsupported: 'Commands do not take attachments here. Remove the images or selection, or send the text as a message instead.',
   },
 }
 
@@ -454,6 +587,7 @@ const ZH: PanelCopy = {
     reconnecting: '重连中…',
     stopped: '未连接',
   },
+  statusNotFound: '未找到服务',
   approval: {
     eyebrow: '安全检查',
     readTitle: '允许读取页面？',
@@ -465,8 +599,11 @@ const ZH: PanelCopy = {
     allowOnce: '仅允许这一次',
     alwaysAllowReads: '始终允许读取',
     trustSession: '本次会话信任此域',
+    devToolsTitle: '允许使用开发者工具？',
+    trustDevTools: '本次会话信任开发者工具',
     readFootnote: 'Esc 拒绝 · 可随时在设置中关闭自动读取',
     actionFootnote: 'Esc 拒绝 · 关闭侧栏后临时信任失效 · 输入内容不会显示',
+    devToolsFootnote: '开发者工具会暴露页面内部结构与抓包内容。此处的信任在侧栏关闭后失效；附加期间 Chrome 自身无法在该标签页打开开发者工具。',
   },
   tool: {
     running: '正在操作页面',
@@ -490,6 +627,15 @@ const ZH: PanelCopy = {
       browser_reload: '刷新页面',
       browser_get_text: '提取文字',
       browser_wait: '等待页面',
+      browser_devtools_elements: '查看元素',
+      browser_devtools_set_element_style: '修改元素 CSS',
+      browser_devtools_set_element_attribute: '修改元素属性',
+      browser_console_eval: '执行页面 JS',
+      browser_console_logs: '读取控制台',
+      browser_devtools_network: '控制网络抓包',
+      browser_devtools_list_requests: '列出网络请求',
+      browser_devtools_get_request: '查看请求详情',
+      browser_devtools_request_body: '读取请求正文',
     },
     overflow: (shown, total) => `${shown.join(' → ')} 等${total}个工具`,
   },
@@ -501,14 +647,15 @@ const ZH: PanelCopy = {
     closedTab: '已关闭的标签页',
     questionTitle: '助手要跟随当前页面吗？',
     questionBody: (controlled, active) => `助手仍绑定“${controlled}”，你刚切到“${active}”。选择前，浏览器操作会暂停。`,
-    keep: '留在原页面',
-    keepAlways: '留在原页面并不再询问',
-    follow: '跟随当前页面',
+    keep: '助手留在原页面',
+    keepAlways: '助手留在原页面并不再询问',
+    follow: '助手跟随当前页面',
+    returnToAssistant: '跳转回到助手页面',
     backgroundTitle: () => '助手仍在原页面',
     backgroundBody: (active) => `你正在查看“${active}”，后续浏览器操作仍会在原页面执行。`,
     pinnedBody: (active) => `你正在查看“${active}”，后续浏览器操作仍会在原页面执行；切换标签页时不会再询问。`,
     askAgain: '切换标签页时重新询问',
-    followCurrent: '改为跟随当前页',
+    followCurrent: '改为跟随当前页面',
     lostTitle: '受控标签页已关闭',
     lostBody: '为避免操作错页，浏览器操作已暂停。',
     useCurrent: '使用当前页面',
@@ -528,9 +675,23 @@ const ZH: PanelCopy = {
     back: '返回对话',
     eyebrow: '浏览器助手',
     title: '设置',
+    language: '界面语言',
+    languageHelp: '助手侧栏与通知所用语言，切换后立即生效。',
+    languageAuto: '自动（跟随 Chrome）',
+    languageEnglish: 'English',
+    languageChinese: '中文',
     bridgeAddress: '桥地址',
     bridgeHelp: '留空时自动检测本机服务',
-    bridgePlaceholder: '自动检测 3080 / 3081 / 3090 / 14389 / 43189',
+    bridgePlaceholder: '自动检测（含桌面版信标 43189–43198）',
+    detect: '自动检测',
+    detectCancel: '取消',
+    detectHelp: '探测一次本机，并列出所有本地 dsh 实例。',
+    detectProgress: (done, total) => `正在探测 ${done} / ${total} 个端口…`,
+    detectEmpty: '未找到服务。',
+    detectPick: '点击实例即可填入它的地址。',
+    detectCurrent: '当前使用',
+    detectConnected: (address) => `已连接：${address}`,
+    detectSource: { fixed: '固定端口', beacon: '信标' },
     tokenHelp: 'Firefox 和远程部署需要填写',
     tokenPlaceholder: 'Firefox / 远程部署时填写',
     pageSharing: '页面内容共享',
@@ -540,6 +701,14 @@ const ZH: PanelCopy = {
     sharingOff: '关闭',
     unrestrictedBrowserAccess: '允许模型完全控制浏览器',
     unrestrictedBrowserAccessHelp: '模型无需确认即可读取所有 HTTP(S) 页面、查看全部已打开标签页的标题和链接，并执行包括跟随、关闭标签页在内的所有操作。浏览器受保护页面的内容仍不可访问。',
+    allowDevTools: '允许开发者工具',
+    allowDevToolsHelp: '高权限功能：允许模型查看并修改页面元素与 CSS、在页面中执行 JavaScript、读取已捕获的网络请求。默认关闭，关闭时每次调用都会弹出审批。附加调试器期间，Chrome 无法在同一标签页打开自带的开发者工具。',
+    devToolsUnsupported: '不可用 —— 当前浏览器未提供调试器 API。',
+    devToolsOff: '已关闭 —— 每次调用都会请求审批。',
+    devToolsIdle: '已开启 —— 首次调用时附加调试器。',
+    devToolsAttached: '调试器已附加',
+    devToolsError: '最近一次错误：',
+    devToolsDetach: '立即断开',
     approvalNotifications: '浏览器审批通知',
     approvalNotificationsHelp: '侧栏关闭时收到审批请求，通过系统通知提醒你',
     autoResumeSession: '续接当前页面会话',
@@ -676,6 +845,41 @@ const ZH: PanelCopy = {
     selectionTruncated: '（已截断）',
     removeSelection: '移除选中内容',
     scrollToBottom: '回到最新消息',
+    permissionControl: '权限模式',
+    permissionMenu: '权限模式',
+    permissionReadOnly: '仅可查看',
+    permissionWorkspaceWrite: '工作区内修改',
+    permissionFullAccess: '完全权限',
+    permissionAuto: 'Auto review',
+    permissionCustom: '自定义',
+    permissionExperimental: 'EXP',
+    permissionPendingHint: '发送第一条消息创建会话时生效',
+    permissionDefaultHint: (name) => `新会话默认：${name}`,
+    permissionConfirmTitle: (label) => `切换到「${label}」？`,
+    permissionConfirmBody: (label, preset) => preset === 'danger-full-access'
+      ? `完全权限（${label}）下文件与命令操作不再逐次征求批准。请仅在你信任本对话时继续。`
+      : `Auto review 是实验能力：由独立审查者判断每次风险调用。请确认你接受该风险（${label}）。`,
+    permissionConfirmAccept: '切换',
+    permissionConfirmCancel: '取消',
+    permissionSwitchFailed: (reason) => `切换权限模式失败：${reason}`,
+    permissionUnavailable: '当前 dsh 宿主未提供权限模式',
+    modelUnavailable: '模型列表加载失败',
+    modelReasoning: '推理强度',
+    modelReasoningDefault: '默认',
+    retry: '重试',
+    slashMenu: '命令与 Skill',
+    slashCommands: '命令',
+    slashSkills: 'Skill',
+    slashLocal: '面板自带',
+    slashUserOnly: '仅用户可调用',
+    slashLocalModel: '选择下一轮使用的模型',
+    slashEmpty: '没有匹配的命令或 Skill',
+    slashProvisional: '发送第一条消息创建会话后可用',
+    unknownCommand: (name) => `/${name} 不是命令或 Skill，已阻止发送。若想按普通文本发送，请在行首加一个空格。`,
+    commandFailed: (reason) => `命令执行失败：${reason}`,
+    commandSucceeded: '命令已执行',
+    commandProvisional: '这条命令需要真实会话：请先发送第一条消息',
+    commandAttachmentsUnsupported: '命令不支持附件：请先移除图片或选中内容，或把它作为普通消息发送。',
   },
 }
 

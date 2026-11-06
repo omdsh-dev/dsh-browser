@@ -20,6 +20,7 @@ const configs = [
   'vite.background.config.ts',
   'vite.content.config.ts',
   'vite.panel.config.ts',
+  'vite.offscreen.config.ts',
 ]
 
 if (watch) {

@@ -167,10 +167,13 @@ describe('dispatchToolCall', () => {
       { unrestrictedAccess: true, commitAction, rollbackActionCommit },
     )
 
+    // The failure now carries the underlying transport detail instead of a
+    // fixed sentence, so the model can tell a closed port from a CDP error.
     expect(answer).toMatchObject({
       ok: false,
-      error: { code: 'content-unavailable', message: expect.stringContaining('operation was dispatched') },
+      error: { code: 'content-unavailable', message: expect.stringContaining('failed after it was dispatched') },
     })
+    expect(JSON.stringify(answer)).toContain('port closed')
     expect(commitAction).toHaveBeenCalledOnce()
     expect(rollbackActionCommit).not.toHaveBeenCalled()
     expect(chromeMock.sendMessage).toHaveBeenCalledOnce()

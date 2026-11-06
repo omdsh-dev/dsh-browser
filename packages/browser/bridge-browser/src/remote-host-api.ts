@@ -23,19 +23,20 @@ import {
 } from './extension-sessions.ts'
 import type { RespondResult } from './protocol.ts'
 
-/** Structural subset of dsh 0.2's Host TypertGateway service. */
+/** Structural subset of dsh 0.2.1's Host TypertGateway service. */
 export interface TypertGatewayLike {
   readonly wireStream: {
     /**
-     * dsh 0.2: `(endpoint, payload, uplink, peer, signal)`.
-     * Legacy stubs/tests: `(endpoint, payload, signal)`.
+     * dsh 0.2.1: `(endpoint, payload, uplink, peer, signal)`. The Peer is
+     * required and never defaulted, so the bridge names the principal its
+     * extension connection speaks for.
      */
     open(
       endpoint: string,
       payload: unknown,
-      uplinkOrSignal: AsyncIterable<unknown> | AbortSignal,
-      peer?: unknown,
-      signal?: AbortSignal,
+      uplink: AsyncIterable<unknown>,
+      peer: HostPeerLike,
+      signal: AbortSignal,
     ): Promise<AsyncIterable<unknown>>
     failure(error: unknown): HostRpcFailure
   }
@@ -43,41 +44,56 @@ export interface TypertGatewayLike {
     readonly namespace: string
     readonly method: string
     readonly args: Readonly<Record<string, unknown>>
+    /** Caller identity every dispatch names explicitly since dsh 0.2.1. */
+    readonly peer: HostPeerLike
     readonly signal?: AbortSignal
   }): Promise<unknown>
 }
 
 /**
+ * Structural subset of dsh 0.2.1's PeerScope: the caller identity a Remote
+ * call speaks for. Connection owns the instance; `signal` aborts when the
+ * Peer is disposed, and streams that speak for it end with it.
+ */
+export interface HostPeerLike {
+  readonly signal: AbortSignal
+  dispose(): Promise<void>
+}
+
+/**
  * Empty Client→Host uplink for in-process Host wireStream.open calls.
- * dsh 0.2 requires the uplink slot; Gateway-owned endpoints ($events) discard
- * it immediately, and Remote streams still need a valid AsyncIterable.
+ * Gateway-owned endpoints ($events) discard it immediately, and Remote streams
+ * still need a valid AsyncIterable.
  */
 const EMPTY_WIRE_UPLINK: AsyncIterable<unknown> = {
   async *[Symbol.asyncIterator]() { /* no uplink items */ },
 }
 
-/**
- * Open a Host wire stream against either dsh 0.2 or the legacy three-arg form.
- *
- * - arity 3: composition/unit stubs still use `(endpoint, payload, signal)`.
- * - arity 5: real dsh 0.2 TypertGatewayWireStream.
- * - arity 0: Cordis/service wrappers — must use the five-arg call. Treating
- *   these as three-arg maps AbortSignal onto uplink and leaves signal
- *   undefined (hello.ok → stream-failed → WS 1011).
- */
-function openWireStream(gateway: TypertGatewayLike, endpoint: string, payload: unknown, signal: AbortSignal): Promise<AsyncIterable<unknown>> {
-  const open = gateway.wireStream.open
-  if (open.length === 3) {
-    return open(endpoint, payload, signal)
-  }
-  return open(endpoint, payload, EMPTY_WIRE_UPLINK, undefined, signal)
+/** Open one Host wire stream for the bridge's own Peer. */
+function openWireStream(
+  gateway: TypertGatewayLike,
+  peer: HostPeerLike,
+  endpoint: string,
+  payload: unknown,
+  signal: AbortSignal,
+): Promise<AsyncIterable<unknown>> {
+  return gateway.wireStream.open(endpoint, payload, EMPTY_WIRE_UPLINK, peer, signal)
 }
 
-/** Structural subset of dsh 0.2's Host Connection service. */
+/** Structural subset of dsh 0.2.1's Host Connection service. */
 export interface HostConnectionLike {
   createSharedFetchHandler(channel: '/api'): {
-    fetch(request: Request): Promise<Response>
+    fetch(request: Request, peer: HostPeerLike): Promise<Response>
   }
+  /**
+   * Independent in-process Peer, disposed with the Context that read the
+   * service. The bridge authenticates the extension with its own token, then
+   * speaks for the local operator who owns this Host.
+   */
+  createPeer(options: {
+    readonly principal: { readonly kind: 'owner' }
+    readonly interactions?: 'answer' | 'none'
+  }): HostPeerLike
 }
 
 interface InvokeTarget {
@@ -112,6 +128,8 @@ export function createRemoteHostApi(
 
 class RemoteHostApi implements BrowserHostApi {
   private readonly fetchHandler: ReturnType<HostConnectionLike['createSharedFetchHandler']>
+  /** One Peer speaks for every call and stream this extension connection opens. */
+  private readonly peer: HostPeerLike
   private readonly extensionSessions = new ExtensionSessionRegistry()
   /** Last known session/follow tip per Session; drives session/page throughSeq. */
   private readonly historyCursors = new Map<string, number>()
@@ -121,12 +139,35 @@ class RemoteHostApi implements BrowserHostApi {
     private readonly gateway: TypertGatewayLike,
     connection: HostConnectionLike,
   ) {
+    // Interactions default to `answer`; the bridge answers user-question
+    // waterfalls for sessions it created, so it names that explicitly.
+    this.peer = connection.createPeer({ principal: { kind: 'owner' }, interactions: 'answer' })
     this.fetchHandler = connection.createSharedFetchHandler('/api')
+  }
+
+  /**
+   * Dispatch one Remote call as this connection's Peer. dsh 0.2.1 requires the
+   * Peer on every carrier and in-process invocation; one helper keeps the
+   * identity from drifting between call sites.
+   */
+  private invoke(request: {
+    readonly namespace: string
+    readonly method: string
+    readonly args: Readonly<Record<string, unknown>>
+    readonly signal?: AbortSignal
+  }): Promise<unknown> {
+    return this.gateway.invoke({ ...request, peer: this.peer })
   }
 
   async call(call: HostRpcCall): Promise<HostRpcResult> {
     if (call.method === 'session.history') return this.sessionHistory(call)
     if (call.method === 'session.models') return this.sessionModels(call)
+    if (call.method === 'permission.catalog') return this.permissionCatalog(call)
+    if (call.method === 'session.permissions') return this.sessionPermissions(call)
+    if (call.method === 'session.setPermission') return this.sessionSetPermission(call)
+    if (call.method === 'commands.list') return this.commandList(call)
+    if (call.method === 'commands.execute') return this.commandExecute(call)
+    if (call.method === 'skills.list') return this.skillList(call)
     if (call.method === 'workspace.list') return this.workspaceList(call)
 
     const target = invokeTarget(call)
@@ -140,7 +181,7 @@ class RemoteHostApi implements BrowserHostApi {
         const sessionId = sessionIdOf(call.payload)
         if (sessionId !== undefined) await this.activeEvents?.ensureSessionFollow(sessionId, call.signal)
       }
-      const value = await this.gateway.invoke({
+      const value = await this.invoke({
         namespace: target.namespace,
         method: target.method,
         args: target.args,
@@ -163,6 +204,7 @@ class RemoteHostApi implements BrowserHostApi {
   async *events(signal: AbortSignal): AsyncIterable<HostEventFrame> {
     const generation = new EventGeneration(
       this.gateway,
+      this.peer,
       this.sendRemoteEventResult.bind(this),
       this.extensionSessions,
       this.noteHistoryCursor.bind(this),
@@ -200,7 +242,7 @@ class RemoteHostApi implements BrowserHostApi {
     try {
       if (beforeSeq !== undefined) {
         const throughSeq = await this.historyThroughSeq(sessionId, call.signal)
-        const page = await this.gateway.invoke({
+        const page = await this.invoke({
           namespace: 'session',
           method: 'page',
           args: {
@@ -217,7 +259,7 @@ class RemoteHostApi implements BrowserHostApi {
       }
 
       const snapshot = this.activeEvents === undefined
-        ? await oneShotSessionSnapshot(this.gateway, sessionId, call.signal, maxMessages)
+        ? await oneShotSessionSnapshot(this.gateway, this.peer, sessionId, call.signal, maxMessages)
         : await this.activeEvents.openSessionHistory(sessionId, call.signal, maxMessages)
       this.noteHistoryCursor(sessionId, snapshot.cursor)
       return { ok: true, value: historyValue(snapshot) }
@@ -231,17 +273,161 @@ class RemoteHostApi implements BrowserHostApi {
     if (!isRecord(call.payload)) return badRequest('session.models payload must be an object')
     const sessionId = sessionIdOf(call.payload)
     try {
-      const catalog = await this.gateway.invoke({
+      const catalog = await this.invoke({
         namespace: 'session', method: 'modelCatalog', args: {}, signal: call.signal,
       })
       // Provisional Sessions request only the catalog and overlay their pending choice.
-      const projections = sessionId === undefined ? undefined : await this.gateway.invoke({
+      const projections = sessionId === undefined ? undefined : await this.invoke({
         namespace: 'session', method: 'projections', args: { request: { sessionId } }, signal: call.signal,
       })
       const values = isRecord(projections) ? projections.values : undefined
       const modelSelection = isRecord(values) ? values.modelSelection : undefined
       const next = isRecord(modelSelection) ? modelSelectionOf(modelSelection.next) : undefined
       return { ok: true, value: adaptModelCatalog(catalog, next) }
+    } catch (error: unknown) {
+      return { ok: false, error: this.failure(error) }
+    }
+  }
+
+  /** One session's projection values, or undefined when the Host reports none. */
+  private async sessionProjectionValues(
+    sessionId: string,
+    signal: AbortSignal,
+  ): Promise<Record<string, unknown> | undefined> {
+    const projections = await this.invoke({
+      namespace: 'session', method: 'projections', args: { request: { sessionId } }, signal,
+    })
+    const values = isRecord(projections) ? projections.values : undefined
+    return isRecord(values) ? values : undefined
+  }
+
+  /** Process-level permission preset directory: the panel's only source of preset names. */
+  private async permissionCatalog(call: HostRpcCall): Promise<HostRpcResult> {
+    try {
+      const catalog = await this.invoke({
+        namespace: 'permissionPresets', method: 'catalog', args: {}, signal: call.signal,
+      })
+      return { ok: true, value: adaptPermissionCatalog(catalog) }
+    } catch (error: unknown) {
+      return { ok: false, error: this.failure(error) }
+    }
+  }
+
+  /**
+   * Combine the process catalog with the Session's current preset.
+   * A Session whose `permissions` projection is absent (Host without the
+   * permission service) reports the default preset with `routable: false`
+   * instead of failing, so the panel can hide the control.
+   */
+  private async sessionPermissions(call: HostRpcCall): Promise<HostRpcResult> {
+    const sessionId = sessionIdOf(call.payload)
+    if (sessionId === undefined) return badRequest('session.permissions requires a non-empty sessionId')
+    try {
+      const catalog = adaptPermissionCatalog(await this.invoke({
+        namespace: 'permissionPresets', method: 'catalog', args: {}, signal: call.signal,
+      }))
+      const values = await this.sessionProjectionValues(sessionId, call.signal)
+      const current = currentPermissionOf(values?.permissions)
+      return {
+        ok: true,
+        value: {
+          current: current ?? catalog.defaultPreset,
+          routable: current !== undefined,
+          provisional: false,
+          options: catalog.options,
+          defaultOptions: catalog.defaultOptions,
+          defaultPreset: catalog.defaultPreset,
+        },
+      }
+    } catch (error: unknown) {
+      return { ok: false, error: this.failure(error) }
+    }
+  }
+
+  /**
+   * Switch the Session's permission preset through the Host's own
+   * `/permission` command, so the preset selection and both knob events land
+   * in the Session log exactly as a Web GUI selection would.
+   */
+  private async sessionSetPermission(call: HostRpcCall): Promise<HostRpcResult> {
+    if (!isRecord(call.payload)) return badRequest('session.setPermission payload must be an object')
+    const sessionId = sessionIdOf(call.payload)
+    const preset = typeof call.payload.preset === 'string' ? call.payload.preset.trim() : ''
+    if (sessionId === undefined) return badRequest('session.setPermission requires a non-empty sessionId')
+    if (preset === '') return badRequest('session.setPermission requires a preset')
+    try {
+      const catalog = adaptPermissionCatalog(await this.invoke({
+        namespace: 'permissionPresets', method: 'catalog', args: {}, signal: call.signal,
+      }))
+      if (!catalog.options.some((option) => option.value === preset)) {
+        return badRequest(`unknown permission preset ${JSON.stringify(preset)}`)
+      }
+      const executed = await this.runCommand(sessionId, permissionSwitchLine(preset), call)
+      if (!executed.ok) return executed
+      return { ok: true, value: { preset, ...(executed.value as Record<string, unknown>) } }
+    } catch (error: unknown) {
+      return { ok: false, error: this.failure(error) }
+    }
+  }
+
+  /** Host slash-command directory for one Session's agent scope. */
+  private async commandList(call: HostRpcCall): Promise<HostRpcResult> {
+    const sessionId = sessionIdOf(call.payload)
+    if (sessionId === undefined) return badRequest('commands.list requires a non-empty sessionId')
+    try {
+      const value = await this.invoke({
+        namespace: 'commands', method: 'list', args: { agentId: sessionId }, signal: call.signal,
+      })
+      return { ok: true, value: { commands: adaptCommandList(value), provisional: false } }
+    } catch (error: unknown) {
+      return { ok: false, error: this.failure(error) }
+    }
+  }
+
+  /**
+   * Run one Host slash command against the Session's agent.
+   * Command output never becomes a model message; the panel renders the
+   * settled result itself.
+   */
+  private async commandExecute(call: HostRpcCall): Promise<HostRpcResult> {
+    if (!isRecord(call.payload)) return badRequest('commands.execute payload must be an object')
+    const sessionId = sessionIdOf(call.payload)
+    const line = typeof call.payload.line === 'string' ? call.payload.line : ''
+    if (sessionId === undefined) return badRequest('commands.execute requires a non-empty sessionId')
+    if (!isCommandLine(line)) return badRequest('commands.execute requires a slash command line')
+    return this.runCommand(sessionId, line, call)
+  }
+
+  /** User-invocable skill directory for one Session composition. */
+  private async skillList(call: HostRpcCall): Promise<HostRpcResult> {
+    const sessionId = sessionIdOf(call.payload)
+    if (sessionId === undefined) return badRequest('skills.list requires a non-empty sessionId')
+    try {
+      const value = await this.invoke({
+        namespace: 'skills', method: 'list', args: { request: { sessionId } }, signal: call.signal,
+      })
+      return { ok: true, value: { skills: adaptSkillList(value), provisional: false } }
+    } catch (error: unknown) {
+      return { ok: false, error: this.failure(error) }
+    }
+  }
+
+  /**
+   * Dispatch one command line through `commands/execute`.
+   * The Host answers `undefined` for syntactically valid but unknown commands,
+   * which is a caller error rather than an empty success.
+   */
+  private async runCommand(sessionId: string, line: string, call: HostRpcCall): Promise<HostRpcResult> {
+    try {
+      const value = await this.invoke({
+        namespace: 'commands',
+        method: 'execute',
+        args: { agentId: sessionId, line, submittedAttachments: [] },
+        signal: call.signal,
+      })
+      const execution = adaptCommandExecution(value)
+      if (execution === undefined) return badRequest(`unknown command line ${JSON.stringify(line)}`)
+      return { ok: true, value: execution }
     } catch (error: unknown) {
       return { ok: false, error: this.failure(error) }
     }
@@ -255,7 +441,7 @@ class RemoteHostApi implements BrowserHostApi {
     const cached = this.historyCursors.get(sessionId)
     if (cached !== undefined) return cached
     const snapshot = this.activeEvents === undefined
-      ? await oneShotSessionSnapshot(this.gateway, sessionId, signal)
+      ? await oneShotSessionSnapshot(this.gateway, this.peer, sessionId, signal)
       : await this.activeEvents.openSessionHistory(sessionId, signal)
     this.noteHistoryCursor(sessionId, snapshot.cursor)
     const throughSeq = this.historyCursors.get(sessionId)
@@ -277,7 +463,7 @@ class RemoteHostApi implements BrowserHostApi {
     try {
       const controller = new AbortController()
       const signal = AbortSignal.any([call.signal, controller.signal])
-      const source = await openWireStream(this.gateway, 'workspace/follow', { args: {} }, signal)
+      const source = await openWireStream(this.gateway, this.peer, 'workspace/follow', { args: {} }, signal)
       const iterator = source[Symbol.asyncIterator]()
       try {
         const first = await iterator.next()
@@ -320,7 +506,7 @@ class RemoteHostApi implements BrowserHostApi {
       }),
       signal,
     })
-    const response = await this.fetchHandler.fetch(request)
+    const response = await this.fetchHandler.fetch(request, this.peer)
     if (!response.ok) {
       throw new Error(`$events/result transport failed with HTTP ${String(response.status)}: ${await response.text()}`)
     }
@@ -376,12 +562,13 @@ class EventGeneration {
 
   constructor(
     private readonly gateway: TypertGatewayLike,
+    private readonly peer: HostPeerLike,
     private readonly sendResult: SendRemoteEventResult,
     private readonly extensionSessions: ExtensionSessionRegistry,
     private readonly onHistoryCursor: (sessionId: string, cursor: number) => void,
     outerSignal: AbortSignal,
   ) {
-    this.signal = AbortSignal.any([outerSignal, this.lifetime.signal])
+    this.signal = AbortSignal.any([outerSignal, this.lifetime.signal, this.peer.signal])
   }
 
   start(): void {
@@ -443,6 +630,7 @@ class EventGeneration {
     const signal = AbortSignal.any([this.signal, callSignal, controller.signal])
     try {
       const source = await openWireStream(this.gateway,
+        this.peer,
         'session/follow',
         {
           args: {
@@ -549,7 +737,7 @@ class EventGeneration {
 
   private async pumpRemoteEvents(): Promise<void> {
     try {
-      const source = await openWireStream(this.gateway, '$events', { args: {} }, this.signal)
+      const source = await openWireStream(this.gateway, this.peer, '$events', { args: {} }, this.signal)
       let ready = false
       for await (const value of source) {
         if (!ready) {
@@ -736,6 +924,7 @@ function invokeTarget(call: HostRpcCall): InvokeTarget | { readonly error: HostR
 
 async function oneShotSessionSnapshot(
   gateway: TypertGatewayLike,
+  peer: HostPeerLike,
   sessionId: string,
   outerSignal: AbortSignal,
   maxMessages?: number,
@@ -743,6 +932,7 @@ async function oneShotSessionSnapshot(
   const controller = new AbortController()
   const signal = AbortSignal.any([outerSignal, controller.signal])
   const source = await openWireStream(gateway,
+    peer,
     'session/follow',
     {
       args: {
@@ -776,10 +966,10 @@ async function oneShotSessionSnapshot(
 
 function historyValue(snapshot: SessionSnapshot): Record<string, unknown> {
   return {
-    // V3 records remain durable events with embedded Assistant streams. Keep
-    // the legacy chunk-row decoder for older logs/Hosts, without assigning
-    // synthetic durable seqs to the new process-local assistant stream.
-    events: snapshot.records.flatMap(historyRecordEvents).map(event => ({ event })),
+    events: snapshot.records.map(record => {
+      if (!isSessionEventEntry(record)) throw new TypeError('session history carried an invalid record')
+      return { event: record.event }
+    }),
     hasMore: snapshot.hasMore,
     ...(snapshot.projections === undefined ? {} : { projections: snapshot.projections }),
     ...(snapshot.assistantStream === undefined ? {} : { assistantStream: snapshot.assistantStream }),
@@ -821,101 +1011,6 @@ function optionalPositiveInteger(
     throw new TypeError(`${key} must be a positive safe integer`)
   }
   return value as number
-}
-
-function historyRecordEvents(record: unknown): Record<string, unknown>[] {
-  if (!isRecord(record)
-    || (record.type !== 'event' && record.type !== 'chunks')
-    || !isRecord(record.event)) {
-    throw new TypeError('session history carried an invalid record')
-  }
-  const event = record.event
-  if (!isChunkRowEvent(event)) {
-    if (record.type === 'chunks') {
-      throw new TypeError('session history chunks record carried a non-chunk event')
-    }
-    return [event]
-  }
-
-  const data = event.data
-  const members = event.type === 'chunkrow/tool-call-chunks' ? data.args : data.texts
-  const deltas = data.dt
-  if (!Array.isArray(members) || members.length === 0 || members.some(member => typeof member !== 'string')
-    || !Array.isArray(deltas) || deltas.length !== members.length - 1
-    || deltas.some(delta => !Number.isSafeInteger(delta))) {
-    throw new TypeError(`${event.type} carried an invalid compact run`)
-  }
-  if (members.length - 1 > Number.MAX_SAFE_INTEGER - event.seq) {
-    throw new TypeError(`${event.type} sequence range is unsafe`)
-  }
-
-  const events: Record<string, unknown>[] = []
-  let time = event.time
-  for (let index = 0; index < members.length; index += 1) {
-    if (index > 0) time += deltas[index - 1] as number
-    if (!Number.isSafeInteger(time)) throw new TypeError(`${event.type} timestamp range is unsafe`)
-    const chunk = compactChunk(event.type, data, members[index] as string)
-    events.push({
-      type: 'assistant/chunk',
-      seq: event.seq + index,
-      time,
-      data: { turn: data.turn, step: data.step, chunk },
-    })
-  }
-  return events
-}
-
-type ChunkRowEvent = {
-  readonly type: 'chunkrow/text-chunks' | 'chunkrow/reasoning-chunks' | 'chunkrow/tool-call-chunks'
-  readonly seq: number
-  readonly time: number
-  readonly data: Record<string, unknown> & {
-    readonly turn: number
-    readonly step: number
-    readonly index: number
-    readonly dt: readonly unknown[]
-    readonly texts?: readonly unknown[]
-    readonly args?: readonly unknown[]
-  }
-}
-
-function isChunkRowEvent(event: Record<string, unknown>): event is ChunkRowEvent {
-  if (event.type !== 'chunkrow/text-chunks'
-    && event.type !== 'chunkrow/reasoning-chunks'
-    && event.type !== 'chunkrow/tool-call-chunks') return false
-  if (!Number.isSafeInteger(event.seq) || (event.seq as number) < 0 || !Number.isSafeInteger(event.time)
-    || !isRecord(event.data)) {
-    throw new TypeError(`${String(event.type)} carried an invalid compact envelope`)
-  }
-  const data = event.data
-  if (typeof data.turn !== 'number' || typeof data.step !== 'number' || typeof data.index !== 'number') {
-    throw new TypeError(`${String(event.type)} carried invalid compact coordinates`)
-  }
-  if (event.type === 'chunkrow/tool-call-chunks'
-    && (typeof data.id !== 'string' || (data.name !== undefined && typeof data.name !== 'string'))) {
-    throw new TypeError(`${event.type} carried an invalid tool identity`)
-  }
-  return true
-}
-
-function compactChunk(
-  type: ChunkRowEvent['type'],
-  data: ChunkRowEvent['data'],
-  member: string,
-): Record<string, unknown> {
-  if (type === 'chunkrow/text-chunks') {
-    return { type: 'text-delta', index: data.index, text: member }
-  }
-  if (type === 'chunkrow/reasoning-chunks') {
-    return { type: 'reasoning-delta', index: data.index, text: member }
-  }
-  return {
-    type: 'tool-call-delta',
-    index: data.index,
-    id: data.id,
-    ...(data.name === undefined ? {} : { name: data.name }),
-    argumentsDelta: member,
-  }
 }
 
 function respondOutcome(result: RespondResult): RemoteEventOutcome {
@@ -978,6 +1073,122 @@ function modelSelectionOf(value: unknown): {
     model,
     ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
   }
+}
+
+/** One selectable permission preset as the Host advertises it. */
+export interface PermissionCatalogOption {
+  readonly value: string
+  readonly name: string
+  readonly description?: string
+}
+
+/** Process-level permission preset directory. */
+export interface PermissionCatalog {
+  readonly options: readonly PermissionCatalogOption[]
+  readonly defaultOptions: readonly PermissionCatalogOption[]
+  readonly defaultPreset: string
+}
+
+/** Host command line that switches one Session's permission preset. */
+export function permissionSwitchLine(preset: string): string {
+  return `/permission ${preset}`
+}
+
+/**
+ * Host command syntax: byte 0 is `/`, then a lowercase name, then the end of
+ * input or whitespace. Anything else is a prompt, never a command.
+ * @param line - the exact composer line.
+ * @returns true when the line claims the Host command grammar.
+ */
+export function isCommandLine(line: string): boolean {
+  return /^\/[a-z0-9_-]+(?:[ \t]|$)/u.test(line)
+}
+
+function adaptPermissionCatalog(value: unknown): PermissionCatalog {
+  if (!isRecord(value)) throw new TypeError('permissionPresets.catalog returned an invalid directory')
+  const options = adaptPermissionOptions(value.options, 'permissionPresets.catalog options')
+  const defaultOptions = adaptPermissionOptions(value.defaultOptions, 'permissionPresets.catalog defaultOptions')
+  const defaultPreset = typeof value.defaultPreset === 'string' ? value.defaultPreset.trim() : ''
+  if (defaultPreset === '') throw new TypeError('permissionPresets.catalog returned no default preset')
+  return { options, defaultOptions, defaultPreset }
+}
+
+function adaptPermissionOptions(value: unknown, label: string): PermissionCatalogOption[] {
+  if (!Array.isArray(value)) throw new TypeError(`${label} are not an array`)
+  return value.map((entry) => {
+    if (!isRecord(entry)) throw new TypeError(`${label} carried an invalid entry`)
+    const preset = typeof entry.value === 'string' ? entry.value.trim() : ''
+    const name = typeof entry.name === 'string' ? entry.name.trim() : ''
+    if (preset === '' || name === '') throw new TypeError(`${label} carried an invalid entry`)
+    return {
+      value: preset,
+      name,
+      ...(typeof entry.description === 'string' && entry.description !== ''
+        ? { description: entry.description }
+        : {}),
+    }
+  })
+}
+
+/** Read `permissions.currentValue` out of one Session projection payload. */
+function currentPermissionOf(value: unknown): string | undefined {
+  if (!isRecord(value)) return undefined
+  const current = typeof value.currentValue === 'string' ? value.currentValue.trim() : ''
+  return current === '' ? undefined : current
+}
+
+/** Map the Host command directory into the panel's discovery shape. */
+function adaptCommandList(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) throw new TypeError('commands/list returned an invalid directory')
+  return value.map((entry) => {
+    if (!isRecord(entry)) throw new TypeError('commands/list carried an invalid entry')
+    const name = typeof entry.name === 'string' ? entry.name.trim() : ''
+    if (name === '') throw new TypeError('commands/list carried an unnamed command')
+    const input = isRecord(entry.input) ? entry.input : undefined
+    const hint = typeof input?.hint === 'string' ? input.hint : undefined
+    return {
+      name,
+      description: typeof entry.description === 'string' ? entry.description : '',
+      ...(hint === undefined ? {} : { hint }),
+      ...(typeof entry.definitionId === 'string' ? { definitionId: entry.definitionId } : {}),
+    }
+  })
+}
+
+/** Settle the Host command execution envelope; undefined means "unknown command". */
+function adaptCommandExecution(value: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(value) || typeof value.commandId !== 'string') return undefined
+  const result = value.result
+  if (!isRecord(result) || (result.kind !== 'success' && result.kind !== 'error')) {
+    throw new TypeError('commands/execute returned an invalid result')
+  }
+  const text = typeof result.text === 'string' ? result.text : undefined
+  return {
+    commandId: value.commandId,
+    result: {
+      kind: result.kind,
+      ...(text === undefined ? {} : { text }),
+      ...(Number.isSafeInteger(result.sourceEventSeq) ? { sourceEventSeq: result.sourceEventSeq } : {}),
+    },
+  }
+}
+
+/** Map the Host skill directory into the panel's discovery shape. */
+function adaptSkillList(value: unknown): Array<Record<string, unknown>> {
+  const raw = isRecord(value) ? value.skills : undefined
+  if (!Array.isArray(raw)) throw new TypeError('skills/list returned an invalid directory')
+  return raw.map((entry) => {
+    if (!isRecord(entry)) throw new TypeError('skills/list carried an invalid entry')
+    const name = typeof entry.name === 'string' ? entry.name.trim() : ''
+    if (name === '') throw new TypeError('skills/list carried an unnamed skill')
+    return {
+      name,
+      description: typeof entry.description === 'string' ? entry.description : '',
+      ...(typeof entry.whenToUse === 'string' ? { whenToUse: entry.whenToUse } : {}),
+      modelInvocable: entry.modelInvocable === true,
+      ...(typeof entry.path === 'string' ? { path: entry.path } : {}),
+    }
+  })
 }
 
 function badRequest(message: string): HostRpcResult {

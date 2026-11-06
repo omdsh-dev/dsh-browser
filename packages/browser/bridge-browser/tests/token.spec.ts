@@ -28,7 +28,9 @@ describe('token', () => {
     expect(verifyToken('deadbeef-team', 'deadbeef-team')).toBe(true)
   })
 
-  it('persists tokens with 0600 permissions and round-trips', async () => {
+  // Windows has no POSIX permission bits: chmod 0600 leaves the file at 0666,
+  // so the file-mode half of this contract is verifiable only on POSIX hosts.
+  it.skipIf(process.platform === 'win32')('persists tokens with 0600 permissions and round-trips', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'dsh-bridge-token-'))
     const file = join(dir, 'token')
     const token = generateToken()

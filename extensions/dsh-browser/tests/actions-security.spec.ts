@@ -15,7 +15,7 @@ describe('page action result trust boundary', () => {
       ids,
       budget: { maxItems: 20, maxForms: 10, maxChars: 2_000 },
     })).rejects.toMatchObject({
-      message: 'Button [7] is disabled.',
+      message: 'Element [7] is disabled.',
     })
   })
 })

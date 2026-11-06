@@ -17,5 +17,5 @@
     "allowImportingTsExtensions": true,
     "types": ["chrome", "vite/client"]
   },
-  "include": ["src", "tests", "vite.shared.ts", "vite.background.config.ts", "vite.content.config.ts", "vite.panel.config.ts"]
+  "include": ["src", "tests", "vite.shared.ts", "vite.background.config.ts", "vite.content.config.ts", "vite.panel.config.ts", "vite.offscreen.config.ts"]
 }

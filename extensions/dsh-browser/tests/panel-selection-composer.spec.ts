@@ -61,11 +61,17 @@ describe('attaching a page selection in the composer', () => {
       respondToApproval: vi.fn(async () => {}),
       resolveTabAffinity: vi.fn(async () => {}),
       rebindTabAffinity: vi.fn(async () => {}),
+      returnToControlledTab: vi.fn(async () => {}),
       clearSelection: vi.fn(async () => {}),
       registerWindow: vi.fn(async () => {}),
       setActiveSession: vi.fn(async () => {}),
       updateSettings: vi.fn(async () => {}),
+      onDevToolsStatus: vi.fn(() => unsubscribe),
+      detachDevTools: vi.fn(async () => undefined),
       requestStatus: vi.fn(async () => {}),
+      startDiscovery: vi.fn(async () => []),
+      cancelDiscovery: vi.fn(async () => {}),
+      onDiscoveryProgress: vi.fn(() => unsubscribe),
     }
     root = createRoot(document.querySelector('#root')!)
   })

@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import type { BridgeServer } from '../src/server.ts'
@@ -149,8 +152,11 @@ describe('registerBrowserTools', () => {
       properties: Record<string, unknown>
       required?: string[]
     }
+    // 元素编号和 selector 互斥，由扩展验证实际目标。
     expect(click.properties.index).toBeDefined()
-    expect(click.required).toContain('index')
+    expect(click.properties.selector).toBeDefined()
+    expect(click.properties.action).toBeDefined()
+    expect(click.required ?? []).not.toContain('index')
   })
 
   it('declares cooperative timeoutMs on every tool', () => {
@@ -175,20 +181,67 @@ describe('registerBrowserTools', () => {
     const { ctx, bridge, registered } = makeHarness()
     registerBrowserTools(ctx, bridge, { toolTimeoutMs: 5_000, snapshotMaxChars: 12_000, maxInteractiveItems: 60 })
     const descriptionChars = registered.reduce((sum, { definition }) => sum + String(definition.description).length, 0)
-    expect(descriptionChars).toBeLessThan(1_500)
+    expect(descriptionChars / registered.length).toBeLessThan(170)
+    expect(descriptionChars).toBeLessThan(3_100)
   })
 
   it('exposes optional frame routing on frame-local tools only', () => {
     const { ctx, bridge, registered } = makeHarness()
     registerBrowserTools(ctx, bridge, { toolTimeoutMs: 5_000, snapshotMaxChars: 12_000, maxInteractiveItems: 60 })
     const byName = new Map(registered.map((entry) => [entry.name, entry.definition]))
-    for (const name of ['browser_click', 'browser_type', 'browser_press', 'browser_scroll', 'browser_get_text', 'browser_wait']) {
+    for (const name of ['browser_snapshot', 'browser_click', 'browser_type', 'browser_press', 'browser_scroll', 'browser_get_text', 'browser_wait', 'browser_clipboard', 'browser_upload']) {
       const params = byName.get(name)!.parameters as { properties: { frame?: { type?: unknown } } }
       expect(params.properties.frame?.type).toBe('number')
     }
-    for (const name of ['browser_snapshot', 'browser_navigate', 'browser_open_tab', 'browser_list_tabs', 'browser_follow_tab', 'browser_close_tab', 'browser_back', 'browser_forward', 'browser_reload']) {
+    for (const name of ['browser_navigate', 'browser_open_tab', 'browser_list_tabs', 'browser_follow_tab', 'browser_close_tab', 'browser_back', 'browser_forward', 'browser_reload']) {
       const params = byName.get(name)!.parameters as { properties: { frame?: unknown } }
       expect(params.properties.frame).toBeUndefined()
+    }
+  })
+
+  it('declares the input-layer tools and their payload schemas', () => {
+    const { ctx, bridge, registered } = makeHarness()
+    registerBrowserTools(ctx, bridge, { toolTimeoutMs: 5_000, snapshotMaxChars: 12_000, maxInteractiveItems: 60 })
+    const byName = new Map(registered.map((entry) => [entry.name, entry.definition]))
+    const clipboard = byName.get('browser_clipboard')!.parameters as {
+      properties: Record<string, { type?: unknown; enum?: unknown[] }>
+      required?: string[]
+    }
+    expect(clipboard.required).toContain('action')
+    expect(clipboard.properties.action?.enum).toEqual(['write', 'paste'])
+    const upload = byName.get('browser_upload')!.parameters as {
+      properties: Record<string, { type?: unknown; items?: unknown }>
+      required?: string[]
+    }
+    expect(upload.required).toContain('paths')
+    expect(upload.properties.paths).toMatchObject({ type: 'array' })
+    const snapshot = byName.get('browser_snapshot')!.parameters as { properties: Record<string, { type?: unknown }> }
+    expect(snapshot.properties.query).toMatchObject({ type: 'object' })
+    expect(snapshot.properties.frame).toMatchObject({ type: 'number' })
+    const follow = byName.get('browser_follow_tab')!.parameters as { properties: Record<string, unknown> }
+    expect(follow.properties.activate).toBeDefined()
+    const scroll = byName.get('browser_scroll')!.parameters as { properties: Record<string, unknown>; required?: string[] }
+    expect(scroll.required).toContain('direction')
+  })
+
+  it('validates upload paths on the host before dispatching', async () => {
+    const { ctx, bridge, requestTool, registered } = makeHarness()
+    registerBrowserTools(ctx, bridge, { toolTimeoutMs: 1_000, snapshotMaxChars: 12_000, maxInteractiveItems: 60 })
+    const tool = registered.find((r) => r.name === 'browser_upload')!
+    const exec = { signal: new AbortController().signal }
+    const run = tool.definition.execute as (args: unknown, e: { signal: AbortSignal }) => Promise<unknown>
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-upload-'))
+    try {
+      const file = join(dir, 'a.pdf')
+      writeFileSync(file, 'pdf')
+      await run({ selector: '#file', paths: [file] }, exec)
+      expect(requestTool).toHaveBeenLastCalledWith('browser_upload', { selector: '#file', paths: [file] }, exec.signal, 1_000)
+      await expect(run({ selector: '#file', paths: [join(dir, 'missing.pdf')] }, exec))
+        .rejects.toThrow(/does not exist/)
+      await expect(run({ selector: '#file', paths: ['relative.pdf'] }, exec)).rejects.toThrow(/absolute/)
+      await expect(run({ selector: '#file', paths: [dir] }, exec)).rejects.toThrow(/regular file/)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
     }
   })
 

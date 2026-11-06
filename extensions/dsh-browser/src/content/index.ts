@@ -13,7 +13,9 @@
 import { DEFAULT_SNAPSHOT_MAX_CHARS } from '@yuxianglin/dsh-bridge-browser/src/protocol.ts'
 import { runAction, ActionError } from './actions.ts'
 import { ElementIds } from './ids.ts'
+import { handleInputSetup } from './input-support.ts'
 import { SelectionWatcher } from './selection.ts'
+import type { InputSetupRequest } from '../shared/input-setup.ts'
 import type { SnapshotBudget } from './snapshot.ts'
 
 /** Negotiated snapshot budgets, patched in from the background via message. */
@@ -36,9 +38,30 @@ export interface ToolResult {
   error?: { code: string; message: string }
 }
 
-function onMessage(message: unknown, _sender: chrome.runtime.MessageSender, sendResponse: (response: ToolResult) => void): true | undefined {
+function onMessage(message: unknown, _sender: chrome.runtime.MessageSender, sendResponse: (response: unknown) => void): true | undefined {
   if (typeof message !== 'object' || message === null) return
   const msg = message as { type?: string }
+  if (msg.type === 'DSH_INPUT_SETUP') {
+    // Internal trusted-input plumbing: focus/selection/geometry for the
+    // background's debugger-driven pointer and keyboard. Never model-facing.
+    const request = (message as { request?: InputSetupRequest }).request
+    if (request === undefined) {
+      sendResponse({ ok: false, error: { code: 'bad-args', message: 'input setup request is missing.' } })
+      return
+    }
+    try {
+      sendResponse({ ok: true, result: handleInputSetup(request, ids) })
+    } catch (error: unknown) {
+      sendResponse({
+        ok: false,
+        error: {
+          code: error instanceof ActionError ? error.code : 'action-failed',
+          message: error instanceof Error ? error.message : String(error),
+        },
+      })
+    }
+    return
+  }
   if (msg.type === 'DSH_BUDGET') {
     const incoming = (message as { budget?: Partial<SnapshotBudget> }).budget
     if (incoming !== undefined) {

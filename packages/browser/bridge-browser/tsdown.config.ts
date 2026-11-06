@@ -1,13 +1,13 @@
 import { defineConfig } from 'tsdown'
 
 /**
- * The bridge package ships THREE runtime entries: the plugin (index), the
- * invariant companion, and the protocol module — the extension imports
+ * The bridge package ships TWO runtime entries: the plugin (index) and the
+ * protocol module — the extension imports
  * `@yuxianglin/dsh-bridge-browser/protocol`, so the protocol bundle is part
  * of the published surface, not an internal module.
  */
 export default defineConfig({
-  entry: ['lib/types/index.js', 'lib/types/invariant.js', 'lib/types/protocol.js'],
+  entry: ['lib/types/index.js', 'lib/types/protocol.js'],
   outDir: 'lib',
   format: ['esm'],
   platform: 'node',

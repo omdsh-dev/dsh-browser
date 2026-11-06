@@ -22,11 +22,11 @@
     "tldts": "^6.1.86"
   },
   "devDependencies": {
-    "@yuxianglin/dsh-bridge-browser": "workspace:^",
     "@types/chrome": "^0.0.268",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "@yuxianglin/dsh-bridge-browser": "workspace:^",
     "jsdom": "^26.1.0",
     "typescript": "^5.6.2",
     "vite": "^6.0.0",

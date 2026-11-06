@@ -11,10 +11,9 @@ afterEach(() => {
 })
 
 describe('panel protocol', () => {
-  it('accepts session trust while retaining the previous permanent-trust wire value', () => {
+  it('accepts supported approval decisions', () => {
     expect(isApprovalDecision('always-allow-reads')).toBe(true)
     expect(isApprovalDecision('trust-session')).toBe(true)
-    expect(isApprovalDecision('trust-origin')).toBe(true)
     expect(isApprovalDecision('trust-forever')).toBe(false)
   })
 
@@ -180,6 +179,55 @@ describe('panel protocol', () => {
     })
 
     await expect(pending).rejects.toThrow('current tab unavailable')
+  })
+
+  it('sends the revision it was shown when jumping back to the assistant page', async () => {
+    let receive: ((message: unknown) => void) | undefined
+    const postMessage = vi.fn()
+    const port = {
+      postMessage,
+      onMessage: { addListener: vi.fn((listener: (message: unknown) => void) => { receive = listener }) },
+      onDisconnect: { addListener: vi.fn() },
+    }
+    vi.stubGlobal('chrome', { runtime: { connect: vi.fn(() => port) } })
+    vi.spyOn(crypto, 'randomUUID').mockReturnValue('12345678-1234-4234-8234-123456789ac0')
+    const api = connectPanel()
+
+    const pending = api.returnToControlledTab(7)
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'tab-affinity.return',
+      id: '12345678-1234-4234-8234-123456789ac0',
+      revision: 7,
+    })
+
+    receive?.({
+      type: 'tab-affinity.return.result',
+      id: '12345678-1234-4234-8234-123456789ac0',
+      ok: true,
+    })
+    await expect(pending).resolves.toBeUndefined()
+  })
+
+  it('keeps the failure code of a refused jump back so a stale click stays silent', async () => {
+    let receive: ((message: unknown) => void) | undefined
+    const port = {
+      postMessage: vi.fn(),
+      onMessage: { addListener: vi.fn((listener: (message: unknown) => void) => { receive = listener }) },
+      onDisconnect: { addListener: vi.fn() },
+    }
+    vi.stubGlobal('chrome', { runtime: { connect: vi.fn(() => port) } })
+    vi.spyOn(crypto, 'randomUUID').mockReturnValue('12345678-1234-4234-8234-123456789ac1')
+    const api = connectPanel()
+
+    const pending = api.returnToControlledTab(7)
+    receive?.({
+      type: 'tab-affinity.return.result',
+      id: '12345678-1234-4234-8234-123456789ac1',
+      ok: false,
+      error: { code: 'stale-revision', message: 'the tab state changed' },
+    })
+
+    await expect(pending).rejects.toMatchObject({ code: 'stale-revision', message: 'the tab state changed' })
   })
 
   it('delivers a resume hint and records the panel session', () => {
@@ -394,5 +442,51 @@ describe('panel protocol', () => {
     })
 
     await expect(pending).rejects.toThrow('Storage is unavailable')
+  })
+})
+
+describe('developer-tools panel messages', () => {
+  function connectWithPort(): { receive: (message: unknown) => void; postMessage: ReturnType<typeof vi.fn> } {
+    let receive: ((message: unknown) => void) | undefined
+    const postMessage = vi.fn()
+    const port = {
+      postMessage,
+      onMessage: { addListener: vi.fn((listener: (message: unknown) => void) => { receive = listener }) },
+      onDisconnect: { addListener: vi.fn() },
+    }
+    vi.stubGlobal('chrome', { runtime: { connect: vi.fn(() => port) } })
+    return { receive: (message) => { receive?.(message) }, postMessage }
+  }
+
+  it('reports developer-tools state pushed after subscribing', async () => {
+    const { receive } = connectWithPort()
+    const api = connectPanel()
+    const seen: unknown[] = []
+    api.onDevToolsStatus((status) => { seen.push(status) })
+
+    receive({ type: 'devtools.status', supported: true, enabled: true, attached: true, tabId: 42 })
+    expect(seen).toEqual([{ supported: true, enabled: true, attached: true, tabId: 42 }])
+
+    receive({ type: 'devtools.status', supported: false, enabled: false, attached: false, error: 'another debugger' })
+    expect(seen[1]).toEqual({ supported: false, enabled: false, attached: false, error: 'another debugger' })
+  })
+
+  it('resolves the detach request only on its correlated result', async () => {
+    const { receive, postMessage } = connectWithPort()
+    vi.spyOn(crypto, 'randomUUID').mockReturnValue('11111111-1111-4111-8111-111111111111')
+    const api = connectPanel()
+
+    const pending = api.detachDevTools()
+    // Attach the rejection handler before the correlated result arrives, so the
+    // assertion observes it instead of the test runner reporting it unhandled.
+    const outcome = pending.then(() => 'resolved', (error: unknown) => (error as Error).message)
+    expect(postMessage).toHaveBeenCalledWith({ type: 'devtools.detach', id: '11111111-1111-4111-8111-111111111111' })
+
+    // A result for another id must not settle this request.
+    receive({ type: 'devtools.detach.result', id: 'other-id', ok: true })
+    expect(await Promise.race([outcome, Promise.resolve('pending')])).toBe('pending')
+
+    receive({ type: 'devtools.detach.result', id: '11111111-1111-4111-8111-111111111111', ok: false, error: { message: 'boom' } })
+    expect(await outcome).toBe('boom')
   })
 })

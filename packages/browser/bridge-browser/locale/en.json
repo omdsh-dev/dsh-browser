@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Browser Bridge",
+    "description": "Connect the dsh browser extension so the model can read and operate the tab you control."
+  }
+}

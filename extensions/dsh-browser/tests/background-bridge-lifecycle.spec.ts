@@ -60,6 +60,7 @@ function panelPort() {
 function mockChrome(options: {
   localGet?: () => Promise<Record<string, unknown>>
   localSet?: (items: Record<string, unknown>) => Promise<void>
+  sessionGet?: () => Promise<Record<string, unknown>>
   tabGet?: (tabId: number) => Promise<chrome.tabs.Tab>
   tabQuery?: (queryInfo: chrome.tabs.QueryInfo) => Promise<chrome.tabs.Tab[]>
   tabRemove?: (tabId: number) => Promise<void>
@@ -83,6 +84,7 @@ function mockChrome(options: {
     runtime: {
       id: 'test-extension',
       getURL: (path: string) => `chrome-extension://test/${path}`,
+      getPlatformInfo: vi.fn(async () => ({ os: 'win', arch: 'x86-64', nacl_arch: 'x86-64' })),
       onConnect,
       onMessage: chromeEvent<[unknown, chrome.runtime.MessageSender, (response: unknown) => void]>(),
     },
@@ -96,7 +98,7 @@ function mockChrome(options: {
         set: vi.fn(options.localSet ?? (async () => {})),
       },
       session: {
-        get: vi.fn(async () => ({})),
+        get: vi.fn(options.sessionGet ?? (async () => ({}))),
         set: vi.fn(async () => {}),
         remove: vi.fn(async () => {}),
       },
@@ -159,10 +161,10 @@ describe('background bridge lifecycle', () => {
 
   it('abandons an in-flight discovery when the last panel closes', async () => {
     const chromeMock = mockChrome()
-    let finishDiscovery!: (response: Response) => void
-    const fetchMock = vi.fn(async () => await new Promise<Response>((resolve) => {
-      finishDiscovery = resolve
-    }))
+    // Every candidate of the first group stays unanswered until released, so
+    // the test observes the pass exactly while it is in flight.
+    const pending: Array<(response: Response) => void> = []
+    const fetchMock = vi.fn(async () => await new Promise<Response>((resolve) => { pending.push(resolve) }))
     vi.stubGlobal('fetch', fetchMock)
     vi.stubGlobal('WebSocket', FakeWebSocket)
     await import('../src/background/index.ts')
@@ -170,14 +172,19 @@ describe('background bridge lifecycle', () => {
 
     const panel = panelPort()
     chromeMock.onConnect.emit(panel.port)
-    await vi.waitFor(() => { expect(fetchMock).toHaveBeenCalledOnce() })
+    // The fixed-port group is probed as one batch; the beacon group only starts
+    // once every probe of that group has failed.
+    await vi.waitFor(() => { expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(4) })
     expect(chromeMock.alarms.create).toHaveBeenCalledWith('bridge-keepalive', { periodInMinutes: 0.5 })
+    const started = fetchMock.mock.calls.length
 
     panel.onDisconnect.emit()
-    finishDiscovery(new Response(null, { status: 503 }))
+    for (const settle of pending.splice(0)) settle(new Response(null, { status: 503 }))
     await vi.waitFor(() => { expect(chromeMock.alarms.clear).toHaveBeenCalledWith('bridge-keepalive') })
+    await new Promise((resolve) => { setTimeout(resolve, 20) })
 
-    expect(fetchMock).toHaveBeenCalledOnce()
+    // Nothing else was probed after the lease ended, and no socket was opened.
+    expect(fetchMock.mock.calls.length).toBe(started)
     expect(FakeWebSocket.instances).toHaveLength(0)
   })
 
@@ -202,12 +209,15 @@ describe('background bridge lifecycle', () => {
     })
     await Promise.resolve()
     socket.close(4000, 'replaced')
+    const probed = fetchMock.mock.calls.length
 
     chromeMock.alarms.onAlarm.emit({ name: 'bridge-keepalive', scheduledTime: Date.now() })
     await new Promise((resolve) => { setTimeout(resolve, 0) })
 
+    // The replaced slot stays terminal: the alarm probes at most the same
+    // address again and never rediscovers or opens another socket.
     expect(FakeWebSocket.instances).toHaveLength(1)
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(probed + 1)
   })
 
   it('invalidates stale connection settings when their save outlives the panel', async () => {
@@ -940,5 +950,107 @@ describe('background bridge lifecycle', () => {
       t: 'rpc',
       method: 'bridge.injectBrowserSnapshot',
     }))
+  })
+
+  it('connects to a filled-in address without probing anything else', async () => {
+    const chromeMock = mockChrome({
+      localGet: async () => ({ dshSettings: { bridgeUrl: 'ws://127.0.0.1:51801/ext/bridge' } }),
+    })
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      return url.includes(':51801/')
+        ? new Response(JSON.stringify({ wsUrl: 'ws://127.0.0.1:51801/ext/bridge' }), { status: 200 })
+        : new Response(null, { status: 503 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    await import('../src/background/index.ts')
+
+    const panel = panelPort()
+    chromeMock.onConnect.emit(panel.port)
+    await vi.waitFor(() => { expect(FakeWebSocket.instances).toHaveLength(1) })
+
+    expect(FakeWebSocket.instances[0]!.url).toBe('ws://127.0.0.1:51801/ext/bridge')
+    // Only the address itself is checked (pre-flight plus the client's own
+    // probe); no discovery candidate is touched.
+    const probes = fetchMock.mock.calls.map(([input]) => String(input))
+    expect(probes.every((url) => url.includes(':51801/'))).toBe(true)
+  })
+
+  it('falls back to one discovery pass when the filled-in address is gone', async () => {
+    const chromeMock = mockChrome({
+      localGet: async () => ({ dshSettings: { bridgeUrl: 'ws://127.0.0.1:51801/ext/bridge' } }),
+    })
+    const probed: string[] = []
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      probed.push(url)
+      // The desktop restarted on another port: the old address is dead and the
+      // discovery beacon answers for the new one.
+      if (url.includes(':43189/')) {
+        return new Response(JSON.stringify({
+          wsUrl: 'ws://127.0.0.1:60222/ext/bridge',
+          beacon: true,
+        }), { status: 200 })
+      }
+      if (url.includes(':60222/')) {
+        return new Response(JSON.stringify({ wsUrl: 'ws://127.0.0.1:60222/ext/bridge' }), { status: 200 })
+      }
+      return new Response(null, { status: 503 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    await import('../src/background/index.ts')
+
+    const panel = panelPort()
+    chromeMock.onConnect.emit(panel.port)
+    await vi.waitFor(() => { expect(FakeWebSocket.instances).toHaveLength(1) })
+
+    expect(FakeWebSocket.instances[0]!.url).toBe('ws://127.0.0.1:60222/ext/bridge')
+    // The dead address is probed once, never again by the pass.
+    expect(probed.filter((url) => url.includes(':51801/'))).toHaveLength(1)
+    expect(probed.some((url) => url.includes(':43189/'))).toBe(true)
+    // The user's saved address stays as typed; only the remembered URL moves.
+    expect(chrome.storage.local.set).not.toHaveBeenCalledWith(expect.objectContaining({ dshSettings: expect.anything() }))
+    expect(chrome.storage.local.set).toHaveBeenCalledWith({ dshLastBridgeUrl: 'ws://127.0.0.1:60222/ext/bridge' })
+  })
+
+  it('keeps a failing remote address local instead of probing this machine', async () => {
+    const chromeMock = mockChrome({
+      localGet: async () => ({ dshSettings: { bridgeUrl: 'wss://bridge.example/ext/bridge' } }),
+    })
+    const fetchMock = vi.fn(async () => { throw new Error('offline') })
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    await import('../src/background/index.ts')
+
+    const panel = panelPort()
+    chromeMock.onConnect.emit(panel.port)
+    await vi.waitFor(() => { expect(FakeWebSocket.instances).toHaveLength(1) })
+    await new Promise((resolve) => { setTimeout(resolve, 10) })
+
+    expect(FakeWebSocket.instances[0]!.url).toBe('wss://bridge.example/ext/bridge')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('does not probe again while the lease remembers a confirmed miss', async () => {
+    const chromeMock = mockChrome({
+      // DSH stayed stopped across a service-worker restart: the latch survives.
+      sessionGet: async () => ({ dshDiscoveryLatch: 'not-found' }),
+    })
+    const fetchMock = vi.fn(async () => new Response(null, { status: 503 }))
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    await import('../src/background/index.ts')
+
+    const panel = panelPort()
+    chromeMock.onConnect.emit(panel.port)
+    await vi.waitFor(() => {
+      expect(panel.postMessage).toHaveBeenCalledWith(expect.objectContaining({ discovery: 'not-found' }))
+    })
+    await new Promise((resolve) => { setTimeout(resolve, 20) })
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(FakeWebSocket.instances).toHaveLength(0)
   })
 })

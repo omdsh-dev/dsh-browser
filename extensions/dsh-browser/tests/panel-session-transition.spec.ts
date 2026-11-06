@@ -64,13 +64,19 @@ describe('panel session transitions', () => {
       respondToApproval: vi.fn(async () => {}),
       resolveTabAffinity: vi.fn(async () => {}),
       rebindTabAffinity: vi.fn(async () => {}),
+      returnToControlledTab: vi.fn(async () => {}),
       clearSelection: vi.fn(async () => {}),
       registerWindow: vi.fn(async () => {}),
       setActiveSession: vi.fn()
         .mockResolvedValueOnce(undefined)
         .mockRejectedValueOnce(new Error('runtime port unavailable')),
       updateSettings: vi.fn(async () => {}),
+      onDevToolsStatus: vi.fn(() => unsubscribe),
+      detachDevTools: vi.fn(async () => undefined),
       requestStatus: vi.fn(async () => {}),
+      startDiscovery: vi.fn(async () => []),
+      cancelDiscovery: vi.fn(async () => {}),
+      onDiscoveryProgress: vi.fn(() => unsubscribe),
     }
 
     root = createRoot(document.querySelector('#root')!)
@@ -114,7 +120,12 @@ describe('panel session transitions', () => {
         open: async () => { throw new Error('unexpected stream') },
         failure: (error) => ({ code: 'internal', message: String(error), details: {} }),
       },
-    }, { createSharedFetchHandler: () => ({ fetch: async () => { throw new Error('unexpected fetch') } }) })
+    }, {
+      createSharedFetchHandler: () => ({
+        fetch: async (_request: Request, _peer: unknown) => { throw new Error('unexpected fetch') },
+      }),
+      createPeer: () => ({ signal: new AbortController().signal, dispose: async () => {} }),
+    })
     const original = rpc.getMockImplementation()!
     rpc.mockImplementation(async (method, payload) => {
       if (method !== 'session.models' && method !== 'session.selectModel') return original(method, payload)
@@ -123,7 +134,7 @@ describe('panel session transitions', () => {
       return result.value
     })
     await renderConnected(null)
-    const trigger = document.querySelector<HTMLButtonElement>('.composer-model-trigger')!
+    const trigger = document.querySelector<HTMLButtonElement>('.composer-model .composer-chip-trigger')!
     expect(trigger.textContent).toContain('Saved model')
     await act(async () => { trigger.click() })
     const option = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')]
