@@ -18,23 +18,4 @@ export class ExtensionSessionRegistry {
   has(sessionId: string | undefined): boolean {
     return typeof sessionId === 'string' && this.ids.has(sessionId)
   }
-
-  /** Test helper: drop all tracked ids. */
-  clear(): void {
-    this.ids.clear()
-  }
-}
-
-/**
- * Decide whether the bridge should own ask_user_question for this request.
- * Desktop sessions must fall through to the native answerer waterfall.
- */
-export function shouldBridgeOwnQuestion(input: {
-  hasExtensionConnection: boolean
-  sessionId: string | undefined
-  extensionSessions: Pick<ExtensionSessionRegistry, 'has'>
-}): boolean {
-  return input.hasExtensionConnection
-    && input.sessionId !== undefined
-    && input.extensionSessions.has(input.sessionId)
 }

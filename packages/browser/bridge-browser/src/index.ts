@@ -108,7 +108,10 @@ export interface Config {
   beaconPorts?: number[]
 }
 
-export const Config: z<Config> = z.object({
+/** The shape after schemastery applies its defaults to every field. */
+type ResolvedConfig = Required<Omit<Config, 'token'>> & Pick<Config, 'token'>
+
+export const Config: z<Config, ResolvedConfig> = z.object({
   token: z.string(),
   toolTimeoutMs: z.number().step(1).min(1).default(DEFAULT_TOOL_TIMEOUT_MS),
   snapshotMaxChars: z.number().step(1).min(MIN_SNAPSHOT_MAX_CHARS).default(DEFAULT_SNAPSHOT_MAX_CHARS),
@@ -120,63 +123,17 @@ export const Config: z<Config> = z.object({
   beaconPorts: z.array(z.number().step(1).min(1).max(65535)).default([...BEACON_PORTS]),
 })
 
-/** The shape after schemastery applies its defaults to every field. */
-type ResolvedConfig = Required<Omit<Config, 'token'>> & Pick<Config, 'token'>
-
-/** Configured budgets must be positive integers. Exported for validation tests. */
-export function assertPositiveInteger(name: string, value: number): void {
-  if (!Number.isInteger(value) || value < 1) {
-    throw new Error(`bridge-browser: ${name} must be a positive integer`)
-  }
-}
-
-/**
- * Apply defaults and direct-call validation at the plugin boundary.
- * @param config - Loader-resolved or directly supplied plugin configuration.
- * @returns a complete configuration ready for runtime use.
- */
-export function resolveConfig(config: Config): ResolvedConfig {
-  const resolved: ResolvedConfig = {
-    ...(config.token === undefined ? {} : { token: config.token }),
-    toolTimeoutMs: config.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS,
-    snapshotMaxChars: config.snapshotMaxChars ?? DEFAULT_SNAPSHOT_MAX_CHARS,
-    maxInteractiveItems: config.maxInteractiveItems ?? DEFAULT_MAX_INTERACTIVE_ITEMS,
-    devToolsMaxChars: config.devToolsMaxChars ?? DEFAULT_DEVTOOLS_MAX_CHARS,
-    sessionWorkspacePath: config.sessionWorkspacePath ?? DEFAULT_SESSION_WORKSPACE_PATH,
-    deferSessionCreate: config.deferSessionCreate ?? DEFAULT_DEFER_SESSION_CREATE,
-    beacon: config.beacon ?? DEFAULT_BEACON,
-    beaconPorts: [...(config.beaconPorts ?? BEACON_PORTS)],
-  }
-  if (resolved.beacon && resolved.beaconPorts.length === 0) {
-    throw new Error('bridge-browser: beaconPorts must name at least one port when the beacon is enabled')
-  }
-  for (const port of resolved.beaconPorts) {
-    if (!Number.isInteger(port) || port < 1 || port > 65535) {
-      throw new Error(`bridge-browser: beaconPorts must contain integers from 1 through 65535, got ${String(port)}`)
-    }
-  }
-  assertPositiveInteger('toolTimeoutMs', resolved.toolTimeoutMs)
-  assertPositiveInteger('snapshotMaxChars', resolved.snapshotMaxChars)
-  if (resolved.snapshotMaxChars < MIN_SNAPSHOT_MAX_CHARS) {
-    throw new Error(`bridge-browser: snapshotMaxChars must be at least ${MIN_SNAPSHOT_MAX_CHARS}`)
-  }
-  assertPositiveInteger('maxInteractiveItems', resolved.maxInteractiveItems)
-  assertPositiveInteger('devToolsMaxChars', resolved.devToolsMaxChars)
-  if (resolved.devToolsMaxChars < MIN_SNAPSHOT_MAX_CHARS) {
-    throw new Error(`bridge-browser: devToolsMaxChars must be at least ${MIN_SNAPSHOT_MAX_CHARS}`)
-  }
-  return resolved
-}
-
 /**
  * Mount the bridge: resolve the token, register the upgrade route, the tool
  * set, and an optional system-prompt section, all effect-scoped for HMR.
  *
  * @param ctx - Cordis context.
- * @param config - plugin config (schema defaults applied).
+ * @param resolved - Cordis 完成校验与默认值填充的配置。
  */
-export async function apply(ctx: Context, config: Config): Promise<void> {
-  const resolved = resolveConfig(config)
+export async function apply(ctx: Context, resolved: ResolvedConfig): Promise<void> {
+  if (resolved.beacon && resolved.beaconPorts.length === 0) {
+    throw new Error('bridge-browser: beaconPorts must name at least one port when the beacon is enabled')
+  }
 
   const gateway = ctx.get('typertGateway') as unknown as GatewayCandidate | undefined
   const connection = ctx.get('connection') as unknown as HostConnectionLike | undefined

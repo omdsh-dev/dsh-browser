@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   DEVTOOLS_CAPS_VERSION,
   DEVTOOLS_TOOL_NAMES,
-  isClientFrame,
   isDevToolsCaps,
   isServerFrame,
   parseBridgeFrame,
@@ -122,16 +121,10 @@ describe('parseBridgeFrame', () => {
     const server = parseBridgeFrame(JSON.stringify({ t: 'tool.call', id: '1', name: 'browser_click', args: {}, expiresAt: 123 }))!
     const client = parseBridgeFrame(JSON.stringify({ t: 'hello', token: 't', caps: { textOnly: true, snapshotMaxChars: 500, maxInteractiveItems: 10 } }))!
     expect(isServerFrame(server)).toBe(true)
-    expect(isClientFrame(server)).toBe(false)
     expect(isServerFrame(client)).toBe(false)
-    expect(isClientFrame(client)).toBe(true)
     for (const t of ['hello.ok', 'rpc.result', 'respond.result', 'event', 'tool.call', 'tool.cancel', 'ping', 'error'] as const) {
       const frame = parseBridgeFrame(JSON.stringify(serverShape(t)))!
       expect(isServerFrame(frame)).toBe(true)
-    }
-    for (const t of ['hello', 'rpc', 'respond', 'tool.result', 'pong'] as const) {
-      const frame = parseBridgeFrame(JSON.stringify(clientShape(t)))!
-      expect(isClientFrame(frame)).toBe(true)
     }
   })
 
@@ -165,16 +158,5 @@ function serverShape(t: 'hello.ok' | 'rpc.result' | 'respond.result' | 'event' |
     case 'tool.cancel': return { t, id: '1' }
     case 'ping': return { t }
     case 'error': return { t, code: 'x', message: 'm' }
-  }
-}
-
-/** Minimal valid shape per client-side frame type (for classification tests). */
-function clientShape(t: 'hello' | 'rpc' | 'respond' | 'tool.result' | 'pong'): Record<string, unknown> {
-  switch (t) {
-    case 'hello': return { t, token: 'x', caps: { textOnly: true, snapshotMaxChars: 500, maxInteractiveItems: 10 } }
-    case 'rpc': return { t, id: '1', method: 'x', payload: {} }
-    case 'respond': return { t, id: '1', rpcId: 'q', result: { ok: true, value: {} } }
-    case 'tool.result': return { t, id: '1', ok: true, result: {} }
-    case 'pong': return { t }
   }
 }

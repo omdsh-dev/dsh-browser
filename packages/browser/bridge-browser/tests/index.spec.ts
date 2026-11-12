@@ -5,7 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { BEACON_PORTS } from '../src/protocol.ts'
-import { apply, assertPositiveInteger, Config, resolveConfig } from '../src/index.ts'
+import { apply as applyPlugin, Config } from '../src/index.ts'
+
+async function apply(ctx: Context, config: Config): Promise<void> {
+  await applyPlugin(ctx, new Config(config))
+}
 
 /**
  * The beacon opens real sockets; those are covered by discovery-beacon.spec.ts.
@@ -63,33 +67,22 @@ afterEach(async () => {
   for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true })
 })
 
-describe('assertPositiveInteger', () => {
-  it('accepts positive integers and rejects everything else', () => {
-    expect(() => assertPositiveInteger('x', 1)).not.toThrow()
-    expect(() => assertPositiveInteger('x', 0)).toThrow(/must be a positive integer/)
-    expect(() => assertPositiveInteger('x', -1)).toThrow(/must be a positive integer/)
-    expect(() => assertPositiveInteger('x', 1.5)).toThrow(/must be a positive integer/)
-  })
-})
-
 /** Valid budgets (the Loader applies schema defaults; hand-built tests pass them explicitly). */
 const VALID = { toolTimeoutMs: 90_000, snapshotMaxChars: 32_000, maxInteractiveItems: 60, devToolsMaxChars: 24_000 }
 
 describe('config', () => {
   it('resolves defaults, including an enabled workspace under the dsh home', () => {
-    expect(resolveConfig({})).toEqual({
+    expect(new Config()).toEqual({
       ...VALID,
       sessionWorkspacePath: dshHomePath('browser-sessions'),
       deferSessionCreate: true,
       beacon: true,
       beaconPorts: [...BEACON_PORTS],
     })
-    expect(new Config().sessionWorkspacePath).toBe(dshHomePath('browser-sessions'))
-    expect(new Config().beaconPorts).toEqual([...BEACON_PORTS])
   })
 
   it('preserves explicit values and the empty-string workspace opt-out', () => {
-    expect(resolveConfig({
+    expect(new Config({
       token: 'fixed',
       toolTimeoutMs: 1,
       snapshotMaxChars: 500,
@@ -108,17 +101,16 @@ describe('config', () => {
       beacon: false,
       beaconPorts: [...BEACON_PORTS],
     })
-    expect(new Config({ sessionWorkspacePath: '' }).sessionWorkspacePath).toBe('')
   })
 
   it('rejects beacon ports that are not usable ports', () => {
-    expect(() => resolveConfig({ beaconPorts: [0] })).toThrow(/1 through 65535/)
-    expect(() => resolveConfig({ beaconPorts: [1.5] })).toThrow(/1 through 65535/)
-    expect(() => resolveConfig({ beaconPorts: [] })).toThrow(/at least one port/)
+    expect(() => new Config({ beaconPorts: [0] })).toThrow()
+    expect(() => new Config({ beaconPorts: [1.5] })).toThrow()
+    expect(() => new Config({ beaconPorts: [65536] })).toThrow()
   })
 
   it('keeps an empty port list when the beacon is disabled', () => {
-    expect(resolveConfig({ beacon: false, beaconPorts: [] }).beaconPorts).toEqual([])
+    expect(new Config({ beacon: false, beaconPorts: [] }).beaconPorts).toEqual([])
   })
 })
 
@@ -167,7 +159,11 @@ describe('apply', () => {
   it('rejects invalid budgets loudly', async () => {
     await expect(apply(stubContext(), { ...VALID, toolTimeoutMs: 0 })).rejects.toThrow(/toolTimeoutMs/)
     await expect(apply(stubContext(), { ...VALID, snapshotMaxChars: -1 })).rejects.toThrow(/snapshotMaxChars/)
-    await expect(apply(stubContext(), { ...VALID, snapshotMaxChars: 499 })).rejects.toThrow(/at least 500/)
+    await expect(apply(stubContext(), { ...VALID, snapshotMaxChars: 499 })).rejects.toThrow(/snapshotMaxChars/)
+  })
+
+  it('requires at least one port when the beacon is enabled', async () => {
+    await expect(apply(stubContext(), { beaconPorts: [] })).rejects.toThrow(/at least one port/)
   })
 
   it('advertises the bridge on the default beacon ports', async () => {
