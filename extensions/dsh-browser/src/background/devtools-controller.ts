@@ -784,9 +784,3 @@ function matcher(pattern: unknown): ((url: string) => boolean) | undefined {
   }
   return (url) => url.includes(pattern)
 }
-
-/** Serialize one capture state for the panel. */
-export function captureStatusText(capture: NetworkCapture): string {
-  const state = capture.state()
-  return `Network capture ${state.attached ? 'active' : 'inactive'} · ${state.entries} entries · generation ${state.generation}${state.tabId === undefined ? '' : ` · tab ${state.tabId}`}`
-}

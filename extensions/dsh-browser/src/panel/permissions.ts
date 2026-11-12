@@ -32,9 +32,6 @@ export interface SessionPermissionDirectory {
   options: PermissionPresetOption[]
 }
 
-/** Built-in preset values whose labels the panel owns, exactly like the Web GUI. */
-const BUILT_IN_PRESETS = new Set(['read-only', 'workspace-write', 'danger-full-access', 'auto'])
-
 /** Presets that change the risk posture and therefore need a confirmation. */
 const RISKY_PRESETS = new Set(['danger-full-access', 'auto'])
 
@@ -114,11 +111,6 @@ export function requiresRiskConfirmation(value: string): boolean {
 /** Whether this preset is an experimental opt-in that deserves an EXP badge. */
 export function isExperimentalPreset(value: string): boolean {
   return value === 'auto'
-}
-
-/** Whether the value is one the panel localizes itself. */
-export function isBuiltInPreset(value: string): boolean {
-  return BUILT_IN_PRESETS.has(value)
 }
 
 /** The exact Host command line that switches a Session preset. */
