@@ -79,7 +79,7 @@ export function shellQuote(value: string): string {
 }
 
 export function powerShellQuote(value: string): string {
-  return `'${value.replaceAll("'", "''")}'`
+  return `'${value.replace(/['\u2018-\u201b]/gu, quote => quote + quote)}'`
 }
 
 /**
