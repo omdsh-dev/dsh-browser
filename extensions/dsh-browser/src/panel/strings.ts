@@ -178,6 +178,12 @@ export interface PanelCopy {
     copied: string
     copyError: string
   }
+  uninstall: {
+    title: string
+    runCommand: string
+    copyCommand: string
+    copied: string
+  }
   textSize: {
     open: string
     title: string
@@ -479,6 +485,12 @@ const EN: PanelCopy = {
     copyCheckoutCommand: 'Copy checkout command',
     copied: 'Command copied',
     copyError: 'Could not copy the command. Run the installer from the original installation source instead.',
+  },
+  uninstall: {
+    title: 'Uninstall dsh-browser',
+    runCommand: 'Run this command in Terminal.',
+    copyCommand: 'Copy uninstall command',
+    copied: 'Command copied',
   },
   textSize: {
     open: 'Text size',
@@ -783,6 +795,12 @@ const ZH: PanelCopy = {
     copyCheckoutCommand: '复制 checkout 命令',
     copied: '命令已复制',
     copyError: '无法复制命令，请回到原安装来源重新运行安装脚本。',
+  },
+  uninstall: {
+    title: '卸载 dsh-browser',
+    runCommand: '在终端运行以下命令。',
+    copyCommand: '复制卸载命令',
+    copied: '命令已复制',
   },
   textSize: {
     open: '字号',

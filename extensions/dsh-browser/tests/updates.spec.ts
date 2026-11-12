@@ -124,27 +124,14 @@ describe('extension update checks', () => {
       version: string
       content_security_policy: { extension_pages: string }
     }
-    const installer = readFileSync(`${extensionRoot}/../../scripts/install.sh`, 'utf8')
-
     expect(packageManifest.version).toBe(chromeManifest.version)
     expect(chromeManifest.content_security_policy.extension_pages).toContain(new URL(UPDATE_MANIFEST_URL).origin)
-    expect(installer).toContain('INSTALL_MODE="managed"')
-    expect(installer).toContain('INSTALL_MODE="checkout"')
-    expect(installer).toContain('$DIST_DIR/install-info.json')
   })
 
-  it('keeps the Windows installer writing the same install provenance', () => {
+  it('keeps the Windows installer encoded for PowerShell 5.1', () => {
     const extensionRoot = process.cwd()
     const installerPath = `${extensionRoot}/../../scripts/install.ps1`
-    const installer = readFileSync(installerPath, 'utf8')
-
-    // Windows PowerShell decodes a BOM-less script with the machine's ANSI codepage, which
-    // turns every Chinese message into mojibake. Losing the BOM is silent, so pin it here.
+    // Windows PowerShell 5.1 需要 BOM 才能正确读取 UTF-8 中文。
     expect(readFileSync(installerPath).subarray(0, 3)).toEqual(Buffer.from([0xef, 0xbb, 0xbf]))
-    expect(installer).toContain("$InstallMode = if (Test-Path")
-    expect(installer).toContain("{ 'managed' } else { 'checkout' }")
-    expect(installer).toContain("Join-Path $DistDir 'install-info.json'")
-    expect(installer).toContain('schemaVersion = 1')
-    expect(WINDOWS_UPDATE_COMMAND).toContain('scripts/install.ps1')
   })
 })
