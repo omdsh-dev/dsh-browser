@@ -98,7 +98,7 @@ curl -fsSL https://raw.githubusercontent.com/Lum1104/dsh-browser/refs/heads/main
 Windows 请运行：
 
 ```powershell
-& { $ErrorActionPreference = 'Stop'; $d=New-Item -ItemType Directory -Force -Path '.artifacts/dsh-browser-uninstall'; $s=Join-Path $d.FullName 'uninstall.ps1'; Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/Lum1104/dsh-browser/refs/heads/main/scripts/uninstall.ps1 -OutFile $s; powershell -NoProfile -ExecutionPolicy Bypass -File $s }
+& { $ErrorActionPreference = 'Stop'; $d=New-Item -ItemType Directory -Path (Join-Path ([IO.Path]::GetTempPath()) ('dsh-browser-uninstall.'+[Guid]::NewGuid().ToString('N'))); try { $s=Join-Path $d.FullName 'uninstall.ps1'; Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/Lum1104/dsh-browser/refs/heads/main/scripts/uninstall.ps1 -OutFile $s; powershell -NoProfile -ExecutionPolicy Bypass -File $s } finally { Remove-Item -LiteralPath $d.FullName -Recurse -Force } }
 ```
 
 在源码目录中运行 `bash scripts/uninstall.sh` 或 `.\scripts\uninstall.ps1`。

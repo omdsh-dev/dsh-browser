@@ -72,7 +72,7 @@ for (const mode of ['managed', 'checkout', 'unknown']) {
         assert.equal(preview.status, 0, preview.stdout + preview.stderr)
         assert.ok(preview.stdout.includes(home))
       } else {
-        assert.ok(command.endsWith('| bash') || command.endsWith('-File $s }'))
+        assert.ok(command.endsWith('| bash') || command.includes('-File $s } finally {'))
       }
       await page.bringToFront()
       await card.getByRole('button', { name: locale === 'en' ? 'Copy uninstall command' : '复制卸载命令', exact: true }).click()

@@ -14,7 +14,7 @@
     "check:runtime": "node scripts/check-runtime.mjs",
     "test:smoke": "node scripts/smoke-runtime.mjs",
     "test:browser": "node scripts/smoke-browser.mjs",
-    "test:uninstall": "node --test scripts/tests/uninstall.test.mjs",
+    "test:uninstall": "node --test scripts/tests/uninstall*.test.mjs",
     "test:uninstall:ui": "node scripts/smoke-uninstall-ui.mjs"
   },
   "dependencies": {

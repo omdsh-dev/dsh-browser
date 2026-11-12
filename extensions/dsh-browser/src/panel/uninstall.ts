@@ -15,10 +15,11 @@ export function uninstallCommand(info: ExtensionInstallInfo, userAgent: string =
   }
   if (windows) {
     return '& { $ErrorActionPreference = \'Stop\'; '
-      + '$d=New-Item -ItemType Directory -Force -Path \'.artifacts/dsh-browser-uninstall\'; '
-      + '$s=Join-Path $d.FullName \'uninstall.ps1\'; '
+      + '$d=New-Item -ItemType Directory -Path (Join-Path ([IO.Path]::GetTempPath()) (\'dsh-browser-uninstall.\'+[Guid]::NewGuid().ToString(\'N\'))); '
+      + 'try { $s=Join-Path $d.FullName \'uninstall.ps1\'; '
       + `Invoke-WebRequest -UseBasicParsing ${SCRIPT_ROOT}/uninstall.ps1 -OutFile $s; `
-      + 'powershell -NoProfile -ExecutionPolicy Bypass -File $s }'
+      + 'powershell -NoProfile -ExecutionPolicy Bypass -File $s } '
+      + 'finally { Remove-Item -LiteralPath $d.FullName -Recurse -Force } }'
   }
   return `curl -fsSL ${SCRIPT_ROOT}/uninstall.sh | bash`
 }
