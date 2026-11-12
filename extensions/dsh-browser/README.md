@@ -6,7 +6,6 @@ The **browser-operation end** of dsh: the model reads and operates the browser p
 
 Browser pages are rendered as structured text with a numbered interactive-element inventory. `browser_screenshot` can also capture the controlled viewport after approval. When the DSH host advertises image support, the side panel accepts PNG, JPEG, WebP, and GIF attachments and renders their durable history references.
 
-
 ## What the model can do
 
 | Capability | Action | Notes |
@@ -32,15 +31,6 @@ Browser pages are rendered as structured text with a numbered interactive-elemen
 
 ## Architecture
 
-```
-side panel (React) ◄─port─► background SW/event page ◄─WS─► dsh bridge plugin
-                                 │
-                  tabs.sendMessage (DSH_ACTION, DSH_SELECTION_WATCH)
-                                 ▲ DSH_SELECTION
-                                 ▼
-                        content script (snapshot/actions/privacy/selection)
-```
-
 - **background** (`src/background/`): bridge connection (token auth + exponential-backoff reconnect + keepalive), gateway RPC client, and **fail-closed tool dispatch to a user-controlled tab**.
 - **content script** (`src/content/`): text-only snapshot (readability main text + numbered interactive inventory + form fields), **stable element numbers** (`data-dsh-el`), delta changes, click/type/press/scroll/navigate actions, sensitive-field masking, and a debounced selection watcher that stays disarmed until a side panel is open and page sharing is not `off`.
 - **panel** (`src/panel/`): React conversation UI (resumable session/history/live events/settings); host-advertised image limits gate image selection and preflight checks, durable attachments render through session-authorized reads, messages render as sanitized Markdown, `ask_user_question` requests render as answerable cards, manual tab switches render a control-handoff strip, an active turn exposes a standard stop control, and a highlighted page passage renders as a removable quote that the next prompt carries inside the untrusted-content boundary.
@@ -57,59 +47,11 @@ pnpm --filter dsh-browser-extension run test
 
 Run these commands from the repository root. Chrome outputs to `extensions/dsh-browser/dist/`; Firefox outputs to `extensions/dsh-browser/dist-firefox/`.
 
+For extension development, load `extensions/dsh-browser/dist/` from `chrome://extensions`, or load `extensions/dsh-browser/dist-firefox/manifest.json` from `about:debugging#/runtime/this-firefox`. Rebuild and reload after code changes.
+
 ## Install and use
 
-The recommended zero-configuration command does not require Git or a local clone:
-
-1. **Build and install the extension**:
-
-   ```sh
-   curl -fsSL https://raw.githubusercontent.com/Lum1104/dsh-browser/refs/heads/main/scripts/install.sh | bash
-   ```
-
-   On Windows, run this in PowerShell instead:
-
-   ```powershell
-   $s="$env:TEMP\dsh-install.ps1"; irm https://raw.githubusercontent.com/Lum1104/dsh-browser/refs/heads/main/scripts/install.ps1 -OutFile $s; powershell -NoProfile -ExecutionPolicy Bypass -File $s
-   ```
-
-   The script downloads a managed workspace to `~/.dsh/dsh-browser`, builds the bridge plugin, registers its official bundle in the local dsh `web` profile, builds the extension, copies the output to the stable directory `~/.dsh/browser-extension`, and opens `chrome://extensions`. Enable Developer mode, choose Load unpacked, and select the extension directory. Running the command again updates the managed installation.
-
-   A cloned checkout uses the same installer without downloading or overwriting source files:
-
-   ```sh
-   git clone https://github.com/Lum1104/dsh-browser.git
-   cd dsh-browser
-   ./scripts/install.sh
-   ```
-
-   Windows checkouts run `.\scripts\install.ps1` instead. Paths containing spaces are supported: the installer uses a profile-local directory junction instead of putting the absolute checkout path in pnpm's link spec.
-
-2. **Start dsh with the bridge plugin mounted**. Use either the workspace-pinned runtime:
-
-   ```sh
-   cd ~/.dsh/dsh-browser && pnpm start
-   ```
-
-   From a clone, run `pnpm start` in the repository root instead.
-
-   Or use the exact supported public runtime:
-
-   ```sh
-   npx @deepseek-ai/dsh@0.2.1-rc.5 web
-   ```
-
-   Both commands load the same bundle from the local `web` profile. Port 3080 is used by default; append `--port <port>` when it is occupied.
-
-   **DSH Desktop users**: the Desktop app launches its host with `--port 0`, so the OS assigns a different local Web port on every start and no fixed port list can predict it. The bridge plugin therefore also listens on a fixed loopback discovery beacon (`43189`–`43198`, first free port) that advertises the real bridge URL. Discovery runs once when the panel opens: a filled-in address is tried first, and only a loopback address that does not answer falls back to one automatic pass. When nothing is found the status reads "No service found" and nothing retries; open **Settings → Detect** to list every local instance and pick one, or type `http://127.0.0.1:<port>` by hand. To pin the port instead, override the `webserver` row in `~/.dsh/profiles/desktop/cordis.patch.yml` — patch `config` is replaced wholesale, so repeat `host` as well.
-
-   Loading or reloading the extension is passive: it does not probe local ports or open a WebSocket until the side panel is opened. A healthy connection established by the user may remain available for background approvals after the panel closes, but it will not reconnect without an open panel if it drops or another browser replaces it.
-
-3. **Use it**: open a normal `http://` or `https://` page and click the DeepSeek whale icon. Both builds auto-discover local dsh. Chrome loopback connections need no address or token; Firefox must be given the token from `~/.dsh/ext-bridge-token` because a `moz-extension://` UUID is not an add-on identity. Chat directly or click "Read page" first.
-
-Pages that were already open before extension installation or reload are instrumented automatically on the first action, so they do not require a manual refresh. Browser-internal and protected pages such as `chrome://` and the Chrome Web Store expose only tab metadata and browser-level HTTP(S) navigation, back, forward, and reload; their DOM cannot be read or operated.
-
-For extension-only development, load `extensions/dsh-browser/dist/` from `chrome://extensions`, or run `build:firefox` and load `extensions/dsh-browser/dist-firefox/manifest.json` from `about:debugging#/runtime/this-firefox`. Rebuild and reload after code changes.
+See the root README for [installation, updates, startup, and uninstall](../../README.md#detailed-installation-and-usage).
 
 ## Composer controls: permission, model, commands, and skills
 
@@ -179,7 +121,5 @@ Chrome uses `sidePanel`; Firefox uses `sidebar_action`. Both request `storage` (
 - Developer tools require Chrome 125+, a setting/session grant or per-call approval, and an available debugger connection. Chrome shows its debugging banner while the connection remains attached, including during network capture.
 - Tab affinity is global to that extension connection rather than per chat session.
 - Accessible cross-origin iframes are snapshotted and operated with stable `(frame, index)` addresses. Restricted or short-lived frames are reported as unavailable without failing the whole page snapshot.
-- Captcha/image-only controls cannot be handled — the tool result reports "elements with no accessible name" and asks the user to complete that step manually.
 - No automatic token rotation.
 - Synthetic `browser_press` events do not trigger browser-native default actions such as Tab focus movement, arrow-key scrolling, or Enter activation. Chrome's trusted input channel supports these actions; Firefox uses synthetic input.
-- `browser_wait` considers page load plus a fixed quiet window, but does not observe continuously changing DOM state; a live-updating SPA may be reported as stable.
