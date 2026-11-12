@@ -111,10 +111,10 @@ function inspect(home) {
     fail(`安装联接路径已被其他内容占用：${sourceLink}`, `The installation junction path contains other data: ${sourceLink}`)
   }
   regular(token, 'file')
-  // 其他 profile 仍引用桥插件时，保留共享源码与 token。
-  const targets = [sourceLink, extension]
+  // 其他 profile 仍引用桥插件时，保留共享联接、源码与 token。
+  const targets = [extension]
   if (otherProfiles.length === 0) {
-    targets.push(token)
+    targets.push(sourceLink, token)
     if (ownedManaged) targets.push(managed)
   }
   return {
@@ -124,7 +124,7 @@ function inspect(home) {
 
 async function loadRuntime(plan, runtimeRoot) {
   if (!plan.web?.references.length) return undefined
-  const linkedRoots = plan.web.references.flatMap(name => {
+  const linkedRoots = runtimeRoot ? [] : plan.web.references.flatMap(name => {
     const manifest = join(plan.web.dir, 'node_modules', name, 'package.json')
     if (!stat(manifest)) return []
     const root = resolve(dirname(realpathSync(manifest)), '../../..')

@@ -160,6 +160,22 @@ test('linked profiles retain the shared workspace and token', async () => {
   preserved(fixture)
 })
 
+test('other profiles retain the shared source junction and their package resolution', async () => {
+  const fixture = await installation('shared-junction', { mode: 'managed' })
+  const link = join(fixture.profile, '.dsh-browser-source')
+  symlinkSync(fixture.bridge, link, 'junction')
+  await addBridge(fixture, 'another-profile', current, '../web/.dsh-browser-source')
+  const profile = join(fixture.home, 'profiles', 'another-profile')
+  const packageManifest = join(profile, 'node_modules', current, 'package.json')
+  const before = readFileSync(packageManifest, 'utf8')
+  const result = uninstall(fixture)
+  assert.equal(result.status, 0, result.stdout + result.stderr)
+  assert.equal(existsSync(link), true)
+  assert.equal(readFileSync(packageManifest, 'utf8'), before)
+  assert.equal(readJson(join(profile, 'package.json')).dependencies[current], 'link:../web/.dsh-browser-source')
+  preserved(fixture)
+})
+
 test('checkout stored at the managed path is preserved as a checkout', async () => {
   const fixture = await installation('checkout-in-home', { sourceInHome: true })
   const result = uninstall(fixture)
@@ -314,6 +330,16 @@ test('standalone helper discovers an old checkout through the installed bridge',
   if (result.error) throw result.error
   assert.equal(result.status, 0, result.stdout + result.stderr)
   assert.equal(existsSync(fixture.source), true)
+  assert.equal(existsSync(fixture.extension), false)
+  preserved(fixture)
+})
+
+test('an explicit runtime removes the bridge when the linked checkout manifest is damaged', async () => {
+  const fixture = await installation('explicit-runtime')
+  writeFileSync(join(fixture.source, 'package.json'), '{')
+  const result = uninstall(fixture, ['--runtime-root', root])
+  assert.equal(result.status, 0, result.stdout + result.stderr)
+  assert.equal(readFileSync(join(fixture.source, 'package.json'), 'utf8'), '{')
   assert.equal(existsSync(fixture.extension), false)
   preserved(fixture)
 })
