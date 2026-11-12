@@ -15,15 +15,21 @@ if (-not $Engine -or -not (Test-Path -LiteralPath $Engine -PathType Leaf)) {
     -OutFile $Engine
 }
 
-# 释放 PowerShell 的当前目录，允许删除作为工作目录的托管安装。
+# 同时释放 runspace 与进程的当前目录。
 $OriginalLocation = (Get-Location).ProviderPath
-Set-Location -LiteralPath ([System.IO.Path]::GetPathRoot($Engine))
+$OriginalDirectory = [System.IO.Directory]::GetCurrentDirectory()
+$ExecutionRoot = [System.IO.Path]::GetPathRoot($Engine)
+Set-Location -LiteralPath $ExecutionRoot
+[System.IO.Directory]::SetCurrentDirectory($ExecutionRoot)
 try {
   & node $Engine @args
   $Result = $LASTEXITCODE
 } finally {
   if (Test-Path -LiteralPath $OriginalLocation -PathType Container) {
     Set-Location -LiteralPath $OriginalLocation
+  }
+  if (Test-Path -LiteralPath $OriginalDirectory -PathType Container) {
+    [System.IO.Directory]::SetCurrentDirectory($OriginalDirectory)
   }
   if ($DownloadDir -and (Test-Path -LiteralPath $DownloadDir)) {
     Remove-Item -LiteralPath $DownloadDir -Recurse -Force
