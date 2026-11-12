@@ -183,6 +183,7 @@ export interface PanelCopy {
     runCommand: string
     copyCommand: string
     copied: string
+    copyError: string
   }
   textSize: {
     open: string
@@ -491,6 +492,7 @@ const EN: PanelCopy = {
     runCommand: 'Run this command in Terminal.',
     copyCommand: 'Copy uninstall command',
     copied: 'Command copied',
+    copyError: 'Copy failed',
   },
   textSize: {
     open: 'Text size',
@@ -801,6 +803,7 @@ const ZH: PanelCopy = {
     runCommand: '在终端运行以下命令。',
     copyCommand: '复制卸载命令',
     copied: '命令已复制',
+    copyError: '复制失败',
   },
   textSize: {
     open: '字号',

@@ -5,7 +5,7 @@ import { uninstallCommand } from './uninstall.ts'
 
 export function UninstallCard({ copy }: { copy: PanelCopy['uninstall'] }): React.JSX.Element {
   const [info, setInfo] = useState<ExtensionInstallInfo | null>(null)
-  const [copied, setCopied] = useState(false)
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle')
   useEffect(() => {
     let active = true
     void readExtensionInstallInfo(chrome.runtime.getURL('install-info.json')).then(value => {
@@ -24,12 +24,17 @@ export function UninstallCard({ copy }: { copy: PanelCopy['uninstall'] }): React
         <div className="update-actions">
           <button type="button" className="update-check" disabled={command === null}
             onClick={() => {
-              if (command !== null) void navigator.clipboard.writeText(command).then(() => setCopied(true))
+              if (command === null) return
+              setCopyState('idle')
+              void navigator.clipboard.writeText(command).then(
+                () => setCopyState('copied'),
+                () => setCopyState('error'),
+              )
             }}>
-            {copied ? copy.copied : copy.copyCommand}
+            {copyState === 'copied' ? copy.copied : copy.copyCommand}
           </button>
         </div>
-        <span role="status" aria-live="polite">{copied ? copy.copied : ''}</span>
+        <span role="status" aria-live="polite">{copyState === 'error' ? copy.copyError : copyState === 'copied' ? copy.copied : ''}</span>
       </div>
     </details>
   )

@@ -77,7 +77,30 @@ for (const mode of ['managed', 'checkout', 'unknown']) {
       await page.bringToFront()
       await card.getByRole('button', { name: locale === 'en' ? 'Copy uninstall command' : '复制卸载命令', exact: true }).click()
       await card.getByRole('button', { name: locale === 'en' ? 'Command copied' : '命令已复制', exact: true }).waitFor()
-      results.push({ mode, locale, command, copied: true })
+      // 在失焦的子页面中触发真实剪贴板拒绝，再验证重新复制。
+      const navigation = page.waitForEvent('framenavigated', frame => frame.name() === 'uninstall-copy-check')
+      await page.evaluate(() => {
+        const frame = document.createElement('iframe')
+        frame.name = 'uninstall-copy-check'
+        frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;z-index:999999'
+        frame.src = location.href
+        document.body.appendChild(frame)
+      })
+      const frame = await navigation
+      await frame.getByRole('button', { name: locale === 'en' ? 'Open settings' : '打开设置', exact: true }).click()
+      const copyCard = frame.locator('.uninstall-card')
+      await copyCard.locator('summary').click()
+      await copyCard.locator('.uninstall-command').waitFor()
+      await card.locator('.uninstall-command').focus()
+      assert.equal(await frame.evaluate(() => document.hasFocus()), false)
+      await copyCard.locator('button').evaluate(button => button.click())
+      const copyError = locale === 'en' ? 'Copy failed' : '复制失败'
+      await copyCard.getByRole('status').filter({ hasText: copyError }).waitFor()
+      assert.equal(await copyCard.getByRole('status').innerText(), copyError)
+      await copyCard.getByRole('button', { name: locale === 'en' ? 'Copy uninstall command' : '复制卸载命令', exact: true }).click()
+      await copyCard.getByRole('button', { name: locale === 'en' ? 'Command copied' : '命令已复制', exact: true }).waitFor()
+      await page.locator('iframe[name="uninstall-copy-check"]').evaluate(frame => frame.remove())
+      results.push({ mode, locale, command, copied: true, copyFailureReported: true, retried: true })
     }
   } finally {
     await browser.close()
