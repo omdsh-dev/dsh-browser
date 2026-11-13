@@ -387,6 +387,11 @@ $DshCli = Join-Path $Root 'node_modules\@deepseek-ai\dsh\lib\bin.js'
 
 Assert-Command 'pnpm' "未找到 pnpm；请先启用 Corepack 或安装 pnpm。" "pnpm was not found; enable Corepack or install pnpm first."
 Assert-Command 'node' "未找到 Node.js；请先安装受支持的 Node.js 版本。" "Node.js was not found; install a supported Node.js version first."
+$NodeVersion = & node -p 'process.versions.node'
+if ($LASTEXITCODE -ne 0) { Stop-Install "无法读取 Node.js 版本。" "Failed to read the Node.js version." }
+if ([version]$NodeVersion -lt [version]'24.9.0') {
+  Stop-Install "需要 Node.js 24.9.0 或更新版本。" "Node.js 24.9.0 or newer is required."
+}
 
 Write-Step 1 "构建浏览器桥" "Build the browser bridge"
 Invoke-Quiet -WorkingDirectory $Root -Command 'pnpm' -Arguments @('install', '--frozen-lockfile') `
@@ -508,6 +513,6 @@ Write-Pair "• 扩展会自动发现本机 dsh，无需填写地址或 token" "
 $QuotedRoot = "'" + $Root.Replace("'", "''") + "'"
 Write-Host ("• 启动固定版本：cd {0}; pnpm start" -f $QuotedRoot)
 Write-Host ("   Start the pinned version: cd {0}; pnpm start" -f $QuotedRoot)
-Write-Pair "• 或直接启动固定版本：npx @deepseek-ai/dsh@0.2.1-rc.5 web" "Or start the pinned version directly: npx @deepseek-ai/dsh@0.2.1-rc.5 web"
+Write-Pair "• 或直接启动固定版本：npx @deepseek-ai/dsh@0.2.2-rc.2 web" "Or start the pinned version directly: npx @deepseek-ai/dsh@0.2.2-rc.2 web"
 Write-Host ''
 Write-Pair "如果用得顺手，欢迎在 GitHub 点个 Star 支持我们：https://github.com/Lum1104/dsh-browser" "If dsh-browser is useful to you, we'd appreciate a Star on GitHub: https://github.com/Lum1104/dsh-browser"

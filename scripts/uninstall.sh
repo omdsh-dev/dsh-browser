@@ -6,7 +6,7 @@ download_dir=""
 main() {
   local engine="" script_dir
   if ! command -v node >/dev/null; then
-    printf '%s\n' '需要 Node.js 24 或更新版本。 / Node.js 24 or newer is required.' >&2
+    printf '%s\n' '需要 Node.js 24.9.0 或更新版本。 / Node.js 24.9.0 or newer is required.' >&2
     return 1
   fi
   if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then

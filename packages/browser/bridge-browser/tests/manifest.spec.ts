@@ -20,20 +20,20 @@ const dsh = manifest.dsh as {
 const engines = manifest.engines as { dsh?: string; node?: string }
 
 describe('plugin manifest', () => {
-  it('declares the dsh 0.2.1 manifest format and runtime range', () => {
+  it('declares the dsh manifest format and runtime range', () => {
     expect(dsh.manifestVersion).toBe(1)
     expect(dsh.bundle?.patch).toBe('./cordis.patch.yml')
     expect(dsh.client?.platform).toBe('web')
     expect(dsh.client?.inject).toEqual(expect.arrayContaining(['@deepseek-ai/dsh-client-ui-slots']))
-    expect(engines.dsh).toBe('^0.2.1-rc.5')
-    expect(engines.node).toBe('>=24')
+    expect(engines.dsh).toBe('^0.2.2-rc.2')
+    expect(engines.node).toBe('>=24.9.0')
   })
 
   it('pins runtime peer dependencies', () => {
     const peers = manifest.peerDependencies as Record<string, string>
     const dshPeers = Object.keys(peers).filter(name => name.startsWith('@deepseek-ai/dsh'))
     expect(dshPeers.length).toBeGreaterThan(0)
-    for (const name of dshPeers) expect(peers[name]).toBe('0.2.1-rc.5')
+    for (const name of dshPeers) expect(peers[name]).toBe('0.2.2-rc.2')
   })
 
   it('publishes the resources the Plugins page reads', () => {

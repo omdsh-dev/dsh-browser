@@ -190,8 +190,9 @@ function cleanup(plan) {
 }
 
 async function main() {
-  if (Number(process.versions.node.split('.')[0]) < 24) {
-    fail('卸载需要 Node.js 24 或更新版本。', 'Uninstall requires Node.js 24 or newer.')
+  const [nodeMajor, nodeMinor] = process.versions.node.split('.').map(Number)
+  if (nodeMajor < 24 || (nodeMajor === 24 && nodeMinor < 9)) {
+    fail('卸载需要 Node.js 24.9.0 或更新版本。', 'Uninstall requires Node.js 24.9.0 or newer.')
   }
   const { values } = parseArgs({ options: {
     home: { type: 'string' }, 'runtime-root': { type: 'string' },
