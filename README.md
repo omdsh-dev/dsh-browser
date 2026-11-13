@@ -11,7 +11,7 @@ Connect [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) to t
 Pages become structured text with a numbered inventory of interactive elements. Tools address elements by number or selector; `browser_screenshot` captures the controlled tab's viewport after approval. The side panel also accepts PNG, JPEG, WebP, and GIF attachments when the host advertises image support.
 
 > [!IMPORTANT]
-> The workspace is pinned to DSH 0.2.1-rc.5.
+> The workspace is pinned to DSH 0.2.2-rc.2.
 
 ## Quick install
 
@@ -64,12 +64,13 @@ The paired Playwright / extension duration ratio was **1.24** (95% CI **1.16–1
 | Wait for stability | `browser_wait` | Page-load and render-settle detection |
 | Send images | `session.prompt` / `session.attachment` | Host-capability-gated image drafts, image-only prompts, and durable history previews |
 | Quote a selection | side panel composer | Text you highlight in the page appears in the composer and is sent with your next message as fenced, attributed page content |
+| Continue generating | side panel | Continue an interrupted response when the host offers it |
 
 Clicks, text entry, and scrolling run in the selected document, including cross-origin iframes. Chrome uses its debugger for native keyboard events, caret insertion, system paste, and file uploads. Screenshots require an active tab in a focused window; `browser_follow_tab { activate: true }` brings the controlled page to the front.
 
 ## Detailed installation and usage
 
-Requirements: Node.js `>=24`, Corepack/pnpm, and Chrome 125+ or Firefox 140+. Windows additionally needs Windows PowerShell 5.1, which ships with Windows, or PowerShell 7+.
+Requirements: Node.js `>=24.9.0`, Corepack/pnpm, and Chrome 125+ or Firefox 140+. Windows additionally needs Windows PowerShell 5.1, which ships with Windows, or PowerShell 7+.
 
 ### Install or update
 
@@ -125,7 +126,7 @@ cd ~/.dsh/dsh-browser && pnpm start
 From a source checkout, run `pnpm start` in the repository root. The exact supported public runtime is:
 
 ```sh
-npx @deepseek-ai/dsh@0.2.1-rc.5 web
+npx @deepseek-ai/dsh@0.2.2-rc.2 web
 ```
 
 Local Chrome use requires no configuration; Firefox requires the local bridge token described above. Open a page, click the DeepSeek whale icon, and wait for **Connected**. Existing HTTP(S) tabs are instrumented on the first action. On browser-protected pages and extension stores, the model can read tab metadata and use browser-level HTTP(S) navigation, back, forward, and reload, but it cannot inspect or operate the protected page DOM.

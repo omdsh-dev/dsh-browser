@@ -11,7 +11,7 @@
 页面会转换为结构化文本和带编号的交互元素清单。工具通过编号或选择器定位元素；`browser_screenshot` 经批准后截取受控标签页的可视区域。宿主声明图片能力时，侧栏也可发送 PNG、JPEG、WebP 和 GIF 附件。
 
 > [!IMPORTANT]
-> 工作区固定使用 DSH 0.2.1-rc.5。
+> 工作区固定使用 DSH 0.2.2-rc.2。
 
 ## 快速安装
 
@@ -64,12 +64,13 @@ Playwright / 扩展的配对耗时比为 **1.24**（95% CI **1.16–1.34**）：
 | 等待稳定 | `browser_wait` | 页面加载与渲染稳定检测 |
 | 发送图片 | `session.prompt` / `session.attachment` | 按宿主能力启用图片草稿、纯图片消息和持久历史预览 |
 | 引用选中内容 | 侧栏输入框 | 在页面里划选的文字会出现在输入框，随下一条消息一起发送，并带上来源与不可信内容边界 |
+| 继续生成 | 侧栏 | 请求失败后，点击出现的“继续生成”按钮继续对话 |
 
 点击、文本输入和滚动操作在指定文档中执行，支持跨域 iframe。Chrome 通过调试器执行原生键盘事件、光标位置插入、系统粘贴和文件上传。截图要求受控标签页处于活动状态且窗口聚焦，可以使用 `browser_follow_tab { activate: true }` 将页面切到前台。
 
 ## 详细安装与使用
 
-前置要求：Node.js `>=24`、Corepack/pnpm，以及 Chrome 125+ 或 Firefox 140+。Windows 还需要系统自带的 Windows PowerShell 5.1，或 PowerShell 7+。
+前置要求：Node.js `>=24.9.0`、Corepack/pnpm，以及 Chrome 125+ 或 Firefox 140+。Windows 还需要系统自带的 Windows PowerShell 5.1，或 PowerShell 7+。
 
 ### 安装或更新
 
@@ -125,7 +126,7 @@ cd ~/.dsh/dsh-browser && pnpm start
 使用源码 checkout 时，请在仓库根目录运行 `pnpm start`。受支持的精确公开版本为：
 
 ```sh
-npx @deepseek-ai/dsh@0.2.1-rc.5 web
+npx @deepseek-ai/dsh@0.2.2-rc.2 web
 ```
 
 Chrome 本机使用无需配置；Firefox 需要填写上述本地桥 token。打开页面，点击 DeepSeek 鲸鱼图标，等待侧边栏显示**已连接**。已有 HTTP(S) 标签页会在第一次操作时自动加载。在浏览器受保护页面和扩展商店中，模型可以读取标签页元数据，并通过浏览器级能力导航到 HTTP(S)、后退、前进和刷新，但不能读取或操作受保护页面的 DOM。
