@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
+import { createServer as createTcpServer } from 'node:net'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -95,6 +96,11 @@ const server = createServer((request, response) => {
 server.listen(0, '127.0.0.1')
 await once(server, 'listening')
 const origin = `http://127.0.0.1:${server.address().port}`
+const unavailableServer = createTcpServer()
+unavailableServer.listen(0, '127.0.0.1')
+await once(unavailableServer, 'listening')
+const unavailablePort = unavailableServer.address().port
+await new Promise(resolve => unavailableServer.close(resolve))
 
 try {
   await command(['plugin', '--profile', 'web', 'add', '-w', `@yuxianglin/dsh-bridge-browser@link:${bridge}`])
@@ -102,7 +108,17 @@ try {
   await writeFile(patch, [
     '- id: bridge-browser', '  config:', `    token: ${JSON.stringify(token)}`,
     '    sessionWorkspacePath: ""',
-    '- id: tools', '  config:', '    mode: native',
+    '- id: tool-executor-native', '  disabled: false',
+    '- id: tool-executor-ptc', '  disabled: true',
+    '- id: agent-default-model', '  config:',
+    '    provider: connection-check', '    model: connection-check',
+    '- id: llm-pi-ai', '  config:', '    providers:', '      connection-check:',
+    '        api: openai-completions',
+    `        baseURL: http://127.0.0.1:${unavailablePort}/v1`,
+    '        headers:', '          Authorization: Bearer local-connection-check',
+    '        models:', '          - id: connection-check', '            input: [text, image]',
+    '          - id: connection-check-next', '            input: [text, image]',
+    '        retryPolicy:', '          mode: normal', '          maxRetries: 0',
     '- insert:', '    - id: browser-smoke-probe',
     `      name: ${JSON.stringify(pathToFileURL(join(root, 'scripts/fixtures/browser-probe.mjs')).href)}`,
     '      config:', `        token: ${JSON.stringify(token)}`, '',
@@ -116,8 +132,8 @@ try {
   assert.equal(configResponse.status, 200)
   const config = await configResponse.json()
   const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' }
-  const tool = async (name, args) => {
-    const response = await fetch(probe, { method: 'POST', headers, body: JSON.stringify({ name, args }), signal: AbortSignal.timeout(35_000) })
+  const tool = async (name, args, cancelAfterMs) => {
+    const response = await fetch(probe, { method: 'POST', headers, body: JSON.stringify({ name, args, cancelAfterMs }), signal: AbortSignal.timeout(35_000) })
     assert.equal(response.status, 200)
     return response.json()
   }
@@ -319,6 +335,69 @@ try {
     const style = getComputedStyle(element); return [style.marginTop, style.marginRight, style.marginBottom, style.marginLeft]
   }), ['12px', '3px', '4px', '5px'])
   results.push('stylesheet rule edits preserve unrelated declarations and rules')
+  const cancelStarted = performance.now()
+  const canceled = await tool('browser_wait', { ms: 10_000 }, 500)
+  assert.equal(canceled.isError, true, JSON.stringify(canceled))
+  assert.ok(performance.now() - cancelStarted < 5_000, 'browser cancellation must settle before the requested wait')
+  succeed(await tool('browser_get_text', { selector: '#unrelated' }))
+  results.push('canceling an executing browser tool releases the next call')
+
+  // 通过正式界面上传图片，并用真实连接失败验证继续生成。
+  await worker.evaluate(async () => { await chrome.storage.local.set({ dshPanelUiLocale: 'en' }) })
+  const chat = await browser.newPage()
+  await chat.goto(`chrome-extension://${extensionId}/panel/index.html`)
+  await page.bringToFront()
+  const composer = chat.locator('textarea')
+  await composer.waitFor()
+  await waitFor(() => composer.isEnabled(), 'chat session readiness')
+  await chat.locator('input[type=file]').setInputFiles(join(root, 'extensions/dsh-browser/assets/icons/icon32.png'))
+  await composer.fill('Describe this image.')
+  await chat.getByRole('button', { name: 'Send message', exact: true }).click()
+  const continueButton = chat.getByRole('button', { name: 'Continue generating', exact: true })
+  await continueButton.waitFor({ timeout: 30_000 })
+  const preview = chat.locator('.message-image img')
+  await preview.waitFor()
+  assert.equal(await preview.evaluate(image => image.complete && image.naturalWidth > 0), true)
+  assert.equal(await chat.locator('.row.user').count(), 1)
+  await composer.fill('Keep this draft.')
+
+  const bridgeRpc = async (method, payload) => {
+    const id = await panel.evaluate(({ method, payload }) => {
+      const id = crypto.randomUUID()
+      panelPort.postMessage({ type: 'rpc', id, method, payload })
+      return id
+    }, { method, payload })
+    const response = await waitFor(() => panel.evaluate(id => messages.find(message => (
+      message.type === 'rpc.result' && message.id === id
+    )), id), `panel ${method}`)
+    assert.equal(response.ok, true, JSON.stringify(response))
+    assert.equal(response.result.result.ok, true, JSON.stringify(response.result))
+    return response.result.result.value
+  }
+  const listed = await bridgeRpc('session.list', {})
+  const conversation = listed.items.find(item => !item.blank)
+  assert.ok(conversation, JSON.stringify(listed))
+  await continueButton.click()
+  await waitFor(async () => {
+    const history = await bridgeRpc('session.history', { sessionId: conversation.sessionId })
+    return history.events.filter(({ event }) => event.type === 'turn/end').length === 2
+  }, 'continued browser conversation')
+  await continueButton.waitFor()
+  assert.equal(await composer.inputValue(), 'Keep this draft.')
+  assert.equal(await chat.locator('.row.user').count(), 1)
+  const history = await bridgeRpc('session.history', { sessionId: conversation.sessionId })
+  assert.ok(history.events.some(({ event }) => event.type === 'user/message'
+    && event.data.source.kind === 'retry' && event.data.content.length === 0))
+  results.push('image previews load through full attachment references and continuation preserves the composer draft')
+  await bridgeRpc('session.selectModel', {
+    sessionId: conversation.sessionId, provider: 'connection-check', model: 'connection-check-next',
+  })
+  await waitFor(async () => (await chat.locator('.composer-model > button').textContent()).includes('connection-check-next'),
+    'model selection projection in the panel')
+  await bridgeRpc('session.setPermission', { sessionId: conversation.sessionId, preset: 'read-only' })
+  await waitFor(async () => (await chat.getByRole('button', { name: 'Permission preset', exact: true }).textContent()).includes('Read only'),
+    'permission projection in the panel')
+  results.push('model and permission changes made outside the panel update its controls')
   await writeFile(join(directory, 'results.json'), JSON.stringify(results, null, 2))
   console.log(`Browser smoke passed: ${results.join('; ')}`)
   console.log(`Evidence: ${directory}`)

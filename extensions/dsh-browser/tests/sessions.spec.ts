@@ -90,7 +90,7 @@ describe('session title events', () => {
 describe('SessionRuntimeCache', () => {
   it('restores off-session running and concurrent question state', () => {
     const cache = new SessionRuntimeCache()
-    cache.startTurn('session')
+    cache.setRunning('session', true)
     cache.rememberQuestion({ rpcId: 'q1', sessionId: 'session', questions: [{ id: '1', question: 'First?' }] })
     cache.rememberQuestion({ rpcId: 'q2', sessionId: 'session', questions: [{ id: '2', question: 'Second?' }] })
     expect(cache.snapshot('session')).toMatchObject({ running: true })
@@ -99,7 +99,7 @@ describe('SessionRuntimeCache', () => {
 
   it('lets live status beat an older list baseline', () => {
     const cache = new SessionRuntimeCache()
-    cache.finishTurn('session')
+    cache.setRunning('session', false)
     cache.seedRunning('session', true)
     expect(cache.snapshot('session').running).toBe(false)
   })
@@ -110,7 +110,8 @@ describe('SessionRuntimeCache', () => {
     cache.rememberQuestion({ rpcId: 'q2', sessionId: 'session', questions: [{ id: '2', question: 'Second?' }] })
     cache.resolveQuestion({ rpcId: 'q2', sessionId: 'session' })
     expect(cache.snapshot('session').questions.map((question) => question.rpcId)).toEqual(['q1'])
-    cache.finishTurn('session')
+    cache.setRunning('session', false)
+    cache.clearQuestions('session')
     expect(cache.snapshot('session')).toEqual({ running: false, questions: [] })
   })
 })

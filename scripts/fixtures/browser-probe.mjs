@@ -18,12 +18,13 @@ export async function apply(ctx, config) {
     assert.equal(request.method, 'POST')
     const chunks = []
     for await (const chunk of request) chunks.push(chunk)
-    const { name, args } = JSON.parse(Buffer.concat(chunks).toString())
+    const { name, args, cancelAfterMs } = JSON.parse(Buffer.concat(chunks).toString())
     const result = await ctx.tools.execute({
-      callId: randomUUID(), name, arguments: args,
-      signal: AbortSignal.timeout(30_000),
+      calls: [{ type: 'tool-call', id: randomUUID(), name, arguments: JSON.stringify(args) }],
+      signal: AbortSignal.timeout(cancelAfterMs ?? 30_000),
     })
-    response.end(JSON.stringify(result))
+    assert.equal(result.results.length, 1)
+    response.end(JSON.stringify(result.results[0].result))
   })
   server.listen(0, '127.0.0.1')
   await once(server, 'listening')

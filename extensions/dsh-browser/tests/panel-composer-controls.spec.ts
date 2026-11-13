@@ -217,8 +217,8 @@ describe('composer controls', () => {
       t: 'event',
       frame: {
         rpcId: 'event-1',
-        method: 'session/event',
-        payload: { type: 'session/event', sessionId: 'session-current', event: { type: 'turn/start', seq: 1, data: {} } },
+        method: 'session/state',
+        payload: { sessionId: 'session-current', cursor: 1, active: true, running: true, queue: [], pendingInput: [] },
       },
     }) })
     // The stop button proves the panel knows the turn is running.
@@ -379,28 +379,25 @@ describe('composer controls', () => {
     expect(menu?.textContent).toContain('first message')
   })
 
-  it('trusts the Host running flag again when the panel becomes visible', async () => {
+  it('updates the stop button from complete Host state replacements', async () => {
     await renderConnected()
     // The panel believes a turn is running, but the Host says it finished.
     await act(async () => { onEvent?.({
       t: 'event',
       frame: {
         rpcId: 'event-3',
-        method: 'session/event',
-        payload: { type: 'session/event', sessionId: 'session-current', event: { type: 'turn/start', seq: 1, data: {} } },
+        method: 'session/state',
+        payload: { sessionId: 'session-current', cursor: 1, active: true, running: true, queue: [], pendingInput: [] },
       },
     }) })
     expect(document.querySelector('.composer-actions .stop-button')).not.toBeNull()
-    rpc.mockImplementation(async (method: string) => {
-      if (method === 'session.list') return { items: [{ sessionId: 'session-current', running: false, blank: false }] }
-      if (method === 'workspace.list') return { archivedSessionIds: [] }
-      throw new Error(`unexpected RPC: ${method}`)
-    })
-
-    await act(async () => {
-      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
-      document.dispatchEvent(new Event('visibilitychange'))
-    })
+    await act(async () => { onEvent?.({
+      t: 'event',
+      frame: {
+        rpcId: 'event-4', method: 'session/state',
+        payload: { sessionId: 'session-current', cursor: 2, active: true, running: false, queue: [], pendingInput: [] },
+      },
+    }) })
 
     await vi.waitFor(() => {
       expect(document.querySelector('.composer-actions .stop-button')).toBeNull()
@@ -416,11 +413,11 @@ describe('composer controls', () => {
       t: 'event',
       frame: {
         rpcId: 'event-2',
-        method: 'session/event',
+        method: 'session/projection',
         payload: {
-          type: 'session/event',
           sessionId: 'session-current',
-          event: { type: 'permission/preset', seq: 9, data: { preset: 'read-only' } },
+          seq: 9,
+          changes: [{ key: 'permissions', val: { currentValue: 'read-only' } }],
         },
       },
     }) })

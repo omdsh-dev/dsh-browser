@@ -11,7 +11,9 @@ function event(rpcId: string, method: string, payload: unknown): ServerFrame {
 describe('TransientEventCache', () => {
   it('replays running turns and concurrent pending questions', () => {
     const cache = new TransientEventCache()
-    const start = event('start', 'session/event', { sessionId: 'a', event: { type: 'turn/start' } })
+    const start = event('state', 'session/state', {
+      sessionId: 'a', cursor: 1, active: true, running: true, queue: [], pendingInput: [],
+    })
     const first = event('q1', 'question/requested', { sessionId: 'a', questions: [{}] })
     const second = event('q2', 'question/requested', { sessionId: 'b', questions: [{}] })
     cache.ingest(start)
@@ -30,14 +32,18 @@ describe('TransientEventCache', () => {
     expect(cache.replay()).toEqual([first])
   })
 
-  it('drops a session turn and its questions at turn end', () => {
+  it('retains the latest complete state and clears settled questions', () => {
     const cache = new TransientEventCache()
     const other = event('other', 'question/requested', { sessionId: 'b', questions: [{}] })
     cache.ingest(event('start', 'session/event', { sessionId: 'a', event: { type: 'turn/start' } }))
     cache.ingest(event('question', 'question/requested', { sessionId: 'a', questions: [{}] }))
     cache.ingest(other)
     cache.ingest(event('end', 'session/event', { sessionId: 'a', event: { type: 'turn/end' } }))
-    expect(cache.replay()).toEqual([other])
+    const idle = event('state', 'session/state', {
+      sessionId: 'a', cursor: 2, active: true, running: false, queue: [], pendingInput: [],
+    })
+    cache.ingest(idle)
+    expect(cache.replay()).toEqual([idle, other])
   })
 
   it('clears stale state across bridge generations', () => {
