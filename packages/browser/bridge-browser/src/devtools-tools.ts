@@ -17,7 +17,6 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool, type ToolDefinition, type ToolRunContext } from '@deepseek-ai/dsh-tools'
-import { DEVTOOLS_TOOL_NAMES } from './protocol.ts'
 
 /** Options resolved from plugin config before tool registration. */
 export interface BrowserDevToolsOptions {
@@ -265,9 +264,4 @@ export function defineDevTools(call: Call, options: BrowserDevToolsOptions): Too
     getRequest(),
     requestBody(),
   ]
-}
-
-/** The registered names, in the order this module defines them. */
-export function devToolsToolNames(): readonly string[] {
-  return DEVTOOLS_TOOL_NAMES
 }

@@ -6,12 +6,11 @@ dsh 的**浏览器操作桥**挂载经过 token 认证的 WebSocket 通道（`/e
 
 页面快照包含结构化文本、编号控件和遮盖敏感值的表单字段。操作通过元素编号或选择器定位。截图和对话图片使用 DSH 持久附件服务；宿主挂载该服务时，延迟创建的会话会声明图片限制。
 
-
 ## 配置
 
 | 键 | 类型 | 默认 | 说明 |
 |---|---|---|---|
-| `token` | `string` | 自动生成 | 固定 bearer token。缺省时首次启动生成，写入 `~/.dsh/ext-bridge-token`（0600）并打印在启动日志。 |
+| `token` | `string` | 自动生成 | 固定 bearer token。缺省时首次启动生成，保存到 `~/.dsh/ext-bridge-token`（0600）。启动日志显示文件路径。 |
 | `toolTimeoutMs` | `number` | 90000 | 单次工具调用预算，为扩展的 60 秒审批窗口预留时间。 |
 | `snapshotMaxChars` | `number` | 32000 | 单次快照渲染字符上限，最小为 500（经 `hello.ok` caps 协商给扩展）。 |
 | `maxInteractiveItems` | `number` | 60 | 单次快照交互清单条数上限。 |
@@ -25,31 +24,15 @@ dsh 的**浏览器操作桥**挂载经过 token 认证的 WebSocket 通道（`/e
 
 ## 使用
 
-远程安装器会下载一个由脚本托管的 workspace，构建插件，并将它的官方 bundle 注册到本机 dsh 的 `web` profile。该方式无需 Git，也无需提前 clone：
+安装、更新、启动和卸载方式见根目录 README 的[详细安装与使用](../../../README.zh.md#详细安装与使用)。
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/Lum1104/dsh-browser/refs/heads/main/scripts/install.sh | bash
-cd ~/.dsh/dsh-browser && pnpm start
-```
+## 开发
 
-Windows 请改用 PowerShell 安装器：
+插件通过 `package.json` 的 `dsh.bundle.patch` 声明加载 `./cordis.patch.yml`。安装器将本地包注册到 `web` profile，由该 profile 加载配置。
 
-```powershell
-$s="$env:TEMP\dsh-install.ps1"; irm https://raw.githubusercontent.com/Lum1104/dsh-browser/refs/heads/main/scripts/install.ps1 -OutFile $s; powershell -NoProfile -ExecutionPolicy Bypass -File $s
-cd $HOME\.dsh\dsh-browser; pnpm start
-```
-
-开发者也可以 clone 仓库，在 checkout 中依次运行 `./scripts/install.sh` 和 `pnpm start`。本地模式直接使用当前分支，不会下载或覆盖源码。两种安装模式都会注册同一个 profile bundle；构建工具只从选定的 workspace 解析，绝不读取父 checkout 或父目录的 `node_modules`。
-
-工作区针对最新公开发布的 dsh，目前固定使用 0.2.1-rc.5；不支持旧版 DSH：
-
-```sh
-npx @deepseek-ai/dsh@0.2.1-rc.5 web
-```
+桥接插件和扩展共用一个 pnpm workspace。桥接源码直接导入 `@deepseek-ai/cordis` 和 `@deepseek-ai/schemastery`，DSH 依赖与工作区固定版本保持一致。根目录构建命令先构建桥接插件，再构建扩展。
 
 插件清单自带这层声明：`engines.dsh`（`^0.2.1-rc.5`）与 `dsh.manifestVersion: 1` 让 dsh 在加载插件前拒绝不兼容的宿主；插件页直接读取 `locale/en.json` / `locale/zh.json` 里的标题与简介、以及 `icon.svg` 图标来展示，无需激活插件。
-
-安装器会把已解压扩展复制到 `~/.dsh/browser-extension` 并打开 `chrome://extensions`。在 Chrome 中加载这个稳定目录，然后使用侧边栏。扩展会自动发现回环连接，无需输入 token；非回环部署仍需要配置的 bearer token。
 
 ## 面板驱动的 Host 方法
 
@@ -81,10 +64,10 @@ npx @deepseek-ai/dsh@0.2.1-rc.5 web
 
 ## 线协议
 
-帧为按 `t` 判别的 JSON 对象，定义在 [`protocol.ts`](src/protocol.ts)，是通过 workspace 包的 `./src/*` export 与扩展共享的真源。构建后的包还会发布 `@yuxianglin/dsh-bridge-browser/protocol`，供外部消费方使用。
+消息帧是通过 `t` 区分类型的 JSON 对象，定义在 [`protocol.ts`](src/protocol.ts)，通过 workspace 包的 `./src/*` export 与扩展共享。构建后的包提供 `@yuxianglin/dsh-bridge-browser/protocol` 入口，供外部调用方使用。
 
 - 客户端 → 服务端：`hello`（认证+caps）、`rpc`（网关方法透传）、`respond`（按 RPC id 结算宿主交互）、`tool.result`、`pong`。
-- 服务端 → 客户端：`hello.ok`（回显协商后的 caps）、`rpc.result`、`respond.result`（相关联的受理结果或错误）、`event`（由 dsh Remote 流与 waterfall 投影而来的 bridge 内部事件）、`tool.call`、`ping`、`error`。
+- 服务端 → 客户端：`hello.ok`（回显协商后的 caps）、`rpc.result`、`respond.result`（相关联的受理结果或错误）、`event`（由 dsh Remote 流与 waterfall 投影而来的 bridge 内部事件）、`tool.call`、`tool.cancel`、`ping`、`error`。
 
 每个 `respond` 同时携带全局唯一的传输 id 与宿主交互的 `rpcId`。扩展只把回执路由给发起操作的面板，并在超时、面板关闭或桥断线时拒绝尚未完成的响应。
 
@@ -116,22 +99,13 @@ npx @deepseek-ai/dsh@0.2.1-rc.5 web
 
 抓包说明：Chrome 同一标签页只允许一个调试器，因此附加期间浏览器自带的开发者工具无法在该标签页打开，错误信息会点明这一原因。抓包数据保存在内存中且有上限（200 条请求、500 条控制台记录），附加时与每次顶层导航时都会重置。所有返回的页面数据都视为不可信输入。
 
-## 模型体验
-
-- **Token 影响**：一次 `browser_snapshot`（默认 32k 字符）对常见英文文本约为 8–10k token，具体取决于语言和分词器；delta 快照只需零头。系统提示段落引导模型按需快照而非囤积页面文本。
-- **KV 缓存影响**：无（快照不做服务端缓存）。
-- **延迟**：每次动作等待扩展在真实页面执行 + 稳定检测（通常 0.2–2s；导航最长 5s）。
-- **失败模式**：`bridge-closed`（扩展未连接）、`timeout`、`no-active-tab`、`content-unavailable`（页面需刷新）、`action-failed`（编号过期——模型应重新快照）。
-
 ## 扩展点
 
 - 工具集是消费面；seam 是桥接线（`protocol.ts`）。在 `ctx.tools` 注册新工具并经由桥分发即可，扩展的 content script 按动作名分发。
 - 协商 caps（`hello.ok`）让插件无需共享配置文件即可向扩展下达快照预算。
 
-## 已知限制与后续工作
+## 已知限制
 
-- 仅一个活动扩展连接（第二个窗口顶替第一个）。
+- 同时仅有一个活动扩展连接。
 - 可访问的跨源 iframe 会进入快照，并通过稳定的 `(frame, index)` 地址执行操作；受保护或已销毁的 frame 会标记为不可访问，不影响整页快照。
 - token 手动轮换（改 `~/.dsh/ext-bridge-token` 或配置 `token`），无过期。
-- Playwright 驱动的扩展 e2e 会在缺少可用的 Chromium 可执行文件或构建完成的扩展包时自行跳过。
-- 审批由扩展 service worker 强制执行，而不是依赖模型自觉。未来接入 dsh 工具管线时可以把同一策略暴露给其它客户端。

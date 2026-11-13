@@ -1,8 +1,9 @@
 /**
- * Build all three extension targets sequentially into dist/ (or dist-firefox/
+ * Build extension targets sequentially into dist/ (or dist-firefox/
  * with --firefox):
- * background (es|iife) → content (iife) → panel (React). The first target
- * cleans the output; the later ones append. Pass --watch for dev rebuilds.
+ * background (es|iife) → content (iife) → panel (React) → offscreen (iife).
+ * The first target cleans the output; the later ones append.
+ * Pass --watch for dev rebuilds.
  */
 
 import { spawn, spawnSync } from 'node:child_process'
@@ -24,7 +25,7 @@ const configs = [
 ]
 
 if (watch) {
-  // 三个 watcher 并行启动（串行时第一个永不停机，后面的永远不会启动）。
+  // 并行启动各个构建目标的 watcher。
   const children = configs.map((config) => spawn('vite', ['build', '--config', config, '--watch'], {
     cwd: root,
     stdio: 'inherit',

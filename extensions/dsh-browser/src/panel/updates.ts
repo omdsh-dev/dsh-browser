@@ -28,8 +28,8 @@ export interface ExtensionUpdateResult {
 }
 
 export type ExtensionInstallInfo =
-  | { mode: 'managed' }
-  | { mode: 'checkout'; sourceRoot: string }
+  | { mode: 'managed'; dshHome?: string }
+  | { mode: 'checkout'; sourceRoot: string; dshHome?: string }
   | { mode: 'unknown' }
 
 /** A drive-letter root (C:\dsh-browser) or a UNC share (\\host\share\dsh-browser). */
@@ -45,14 +45,17 @@ function isAbsolutePath(value: string): boolean {
 /** Parse installer-written provenance without trusting malformed local data. */
 export function parseExtensionInstallInfo(value: unknown): ExtensionInstallInfo {
   if (typeof value !== 'object' || value === null) return { mode: 'unknown' }
-  const info = value as { schemaVersion?: unknown; mode?: unknown; sourceRoot?: unknown }
+  const info = value as { schemaVersion?: unknown; mode?: unknown; sourceRoot?: unknown; dshHome?: unknown }
   if (info.schemaVersion !== 1) return { mode: 'unknown' }
-  if (info.mode === 'managed') return { mode: 'managed' }
+  if (info.dshHome !== undefined && (typeof info.dshHome !== 'string'
+    || !isAbsolutePath(info.dshHome) || /[\u0000-\u001f]/u.test(info.dshHome))) return { mode: 'unknown' }
+  const location = typeof info.dshHome === 'string' ? { dshHome: info.dshHome } : {}
+  if (info.mode === 'managed') return { mode: 'managed', ...location }
   if (info.mode === 'checkout'
     && typeof info.sourceRoot === 'string'
     && isAbsolutePath(info.sourceRoot)
     && !info.sourceRoot.includes('\0')) {
-    return { mode: 'checkout', sourceRoot: info.sourceRoot }
+    return { mode: 'checkout', sourceRoot: info.sourceRoot, ...location }
   }
   return { mode: 'unknown' }
 }
@@ -71,12 +74,12 @@ export async function readExtensionInstallInfo(
   }
 }
 
-function shellQuote(value: string): string {
+export function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\"'\"'")}'`
 }
 
-function powerShellQuote(value: string): string {
-  return `'${value.replaceAll("'", "''")}'`
+export function powerShellQuote(value: string): string {
+  return `'${value.replace(/['\u2018-\u201b]/gu, quote => quote + quote)}'`
 }
 
 /**
@@ -91,8 +94,7 @@ export function checkoutInstallCommand(sourceRoot: string): string {
 }
 
 /**
- * A managed install records no path, so the panel picks the installer by the platform it is
- * running on — which is the machine the extension was installed to.
+ * Select the managed installer for the browser's current platform.
  */
 export function managedInstallCommand(userAgent: string = navigator.userAgent): string {
   return /windows/i.test(userAgent) ? WINDOWS_UPDATE_COMMAND : UPDATE_COMMAND

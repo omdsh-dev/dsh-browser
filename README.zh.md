@@ -11,11 +11,11 @@
 页面会转换为结构化文本和带编号的交互元素清单。工具通过编号或选择器定位元素；`browser_screenshot` 经批准后截取受控标签页的可视区域。宿主声明图片能力时，侧栏也可发送 PNG、JPEG、WebP 和 GIF 附件。
 
 > [!IMPORTANT]
-> 工作区针对最新公开发布的 dsh，目前固定使用 0.2.1-rc.5；不支持旧版 DSH。
+> 工作区固定使用 DSH 0.2.1-rc.5。
 
 ## 快速安装
 
-本项目不能只使用标准的 `dsh plugin` 命令安装。它同时包含 dsh bridge plugin 和浏览器扩展。一行安装器目前会安装 Chrome 构建。
+安装器会安装桥插件和 Chrome 扩展。
 
 macOS 与 Linux：
 
@@ -67,47 +67,13 @@ Playwright / 扩展的配对耗时比为 **1.24**（95% CI **1.16–1.34**）：
 
 点击、文本输入和滚动操作在指定文档中执行，支持跨域 iframe。Chrome 通过调试器执行原生键盘事件、光标位置插入、系统粘贴和文件上传。截图要求受控标签页处于活动状态且窗口聚焦，可以使用 `browser_follow_tab { activate: true }` 将页面切到前台。
 
-## 组成
-
-```
-packages/browser/bridge-browser/
-  cordis.patch.yml
-extensions/dsh-browser/
-scripts/install.sh
-scripts/install.ps1
-```
-
-## 为什么这样设计
-
-- **使用你的真实浏览器，而不是无头副本**：模型操作你已经打开的页面，登录态、会话和 Cookie 均会保留。
-- **纯文本页面接口**：编号控件、跨快照稳定 ID、delta 更新和敏感值掩码，使模型无需截图也能操作页面；用户主动添加的对话图片走 dsh 独立的多模态消息通道。
-- **用「指」代替「描述」**：直接划选你要问的那段文字，侧栏会把它引用下来，说「解释这个」不必再描述整页内容。只有侧栏打开时才会捕获，并且在你发送消息之前不会离开浏览器。
-- **收窄隐私边界**：密码和支付卡字段始终显示为 `••••`，字段值不会离开页面。
-- **受保护的桥连接**：远程连接使用认证握手，特权网关方法拒绝非回环调用方，扩展把工具绑定到一个由用户控制的标签页。
-
 ## 详细安装与使用
 
 前置要求：Node.js `>=24`、Corepack/pnpm，以及 Chrome 125+ 或 Firefox 140+。Windows 还需要系统自带的 Windows PowerShell 5.1，或 PowerShell 7+。
 
 ### 安装或更新
 
-托管安装请运行：
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/Lum1104/dsh-browser/refs/heads/main/scripts/install.sh | bash
-```
-
-Windows 请运行：
-
-```powershell
-$s="$env:TEMP\dsh-install.ps1"; irm https://raw.githubusercontent.com/Lum1104/dsh-browser/refs/heads/main/scripts/install.ps1 -OutFile $s; powershell -NoProfile -ExecutionPolicy Bypass -File $s
-```
-
-安装器会下载 `main`、构建并注册桥插件、把 Chrome 扩展构建到 `~/.dsh/browser-extension`，然后打开 `chrome://extensions`。首次安装时，请把该目录作为已解压扩展加载；更新时点击**重新加载**。如果 dsh 已在运行，请重启。
-
-`scripts/install.sh` 覆盖 macOS 与 Linux，`scripts/install.ps1` 覆盖 Windows；两者写入同一个托管工作区和同一份安装元数据。当系统提供剪贴板工具（`pbcopy`、`wl-copy`、`xclip`、`xsel` 或 PowerShell 的 `Set-Clipboard`）时，安装器会把扩展路径复制到剪贴板；无论是否复制成功都会打印该路径。若未检测到 Chrome/Chromium，安装器会打印对应的安装命令；设置 `DSH_INSTALL_BROWSER=1` 可让安装器尝试自动安装。
-
-Windows 命令先下载 `install.ps1` 再执行，而不是管道给 `Invoke-Expression`：脚本是带 BOM 的 UTF-8，Windows PowerShell 依赖 BOM 才能正确显示中文，而 `Invoke-Expression` 无法处理开头的 BOM。本地 checkout 路径可以包含空格；安装器通过 profile 内的目录联接注册桥插件，因此包规格中不会出现 Windows 绝对路径。
+运行[快速安装命令](#快速安装)即可安装或更新。安装器打开 `chrome://extensions` 后，首次安装时加载 `~/.dsh/browser-extension` 目录；更新后点击**重新加载**。如果 dsh 已在运行，请重启。
 
 如需从源码 checkout 安装当前分支：
 
@@ -118,6 +84,24 @@ cd dsh-browser
 ```
 
 Windows 请在 checkout 中运行 `.\scripts\install.ps1`。拉取或切换版本后，请重新运行安装器并重新加载扩展。
+
+### 卸载
+
+在扩展的**设置 → 卸载 dsh-browser**中复制命令，然后在终端运行。
+
+也可以直接运行。macOS 或 Linux：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Lum1104/dsh-browser/refs/heads/main/scripts/uninstall.sh | bash
+```
+
+Windows 请运行：
+
+```powershell
+& { $ErrorActionPreference = 'Stop'; $d=New-Item -ItemType Directory -Path (Join-Path ([IO.Path]::GetTempPath()) ('dsh-browser-uninstall.'+[Guid]::NewGuid().ToString('N'))); try { $s=Join-Path $d.FullName 'uninstall.ps1'; Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/Lum1104/dsh-browser/refs/heads/main/scripts/uninstall.ps1 -OutFile $s; powershell -NoProfile -ExecutionPolicy Bypass -File $s } finally { Remove-Item -LiteralPath $d.FullName -Recurse -Force } }
+```
+
+在源码目录中运行 `bash scripts/uninstall.sh` 或 `.\scripts\uninstall.ps1`。
 
 ### Firefox 源码构建
 
@@ -150,14 +134,16 @@ Chrome 本机使用无需配置；Firefox 需要填写上述本地桥 token。�
 
 **侧边栏一直显示「未连接」**
 
-- 确认本机 dsh web 正在运行（默认 `http://127.0.0.1:3080`）。
-- 确认桥接已加载：浏览器打开 `http://127.0.0.1:3080/ext/bridge-config`，应返回类似 `{"wsUrl":"ws://127.0.0.1:3080/ext/bridge"}` 的 JSON。如果返回的是网页而不是 JSON，说明当前运行的 dsh 早于桥接注册——重启 dsh 并刷新页面即可，扩展会自动重连。
-- 面板打开时探测一次：已填地址优先尝试；回环地址连不上时再自动探测一次（上次成功的地址 → `dsh web` 默认端口 → 插件的固定信标端口 43189–43198）。都没找到时状态显示「未找到服务」，在重新打开面板或点「自动检测」之前不会重试。
-- DSH Desktop 每次启动都会重新随机分配本地 Web 端口，所以桥接插件同时监听一个固定回环信标端口。面板找不到时，打开**设置 → 自动检测**列出本机所有实例，点击其中一条即可填入地址；地址仍可手动填写。远程 `--host` 部署需要手动填写地址和 token；Firefox 始终需要 token。
+- 确认 DSH 正在运行。安装或更新后，重启 DSH 并重新打开侧栏。
+- 打开**设置 → 自动检测**，选择需要连接的 DSH 实例。
+- 使用 Firefox 时，在设置中填写 `~/.dsh/ext-bridge-token` 中的 token。
+- 连接远程 DSH 时，在设置中填写服务器地址和对应的桥接 token。
 
 ## 开发
 
 桥接插件和 Chrome/Firefox 扩展都属于本仓库 workspace；所有命令均在本仓库根目录执行。首次开发安装运行 `pnpm install`。
+
+开发文档：[浏览器桥插件](packages/browser/bridge-browser/README.zh.md)与[浏览器扩展](extensions/dsh-browser/README.zh.md)。
 
 ```sh
 pnpm run build
@@ -178,23 +164,18 @@ pnpm --filter dsh-browser-extension run test
 注意：
 
 - 启动前桥接插件必须已有 `lib/` 供 Loader 加载；`scripts/install.sh` 和根目录 `pnpm run build` 都会先构建插件再构建扩展。
-- 桥构建使用 Node.js `copyFileSync` 复制浏览器客户端，因此同一条包脚本不依赖 Unix `cp` 命令。
 - `@deepseek-ai/dsh` 与桥接插件的依赖固定在同一条经过验证的公开发布线上；升级时必须同时更新 manifest、锁文件并重跑根目录检查。
 
 `check:runtime` 检查实际解析的 DSH 依赖和锁文件；`test:smoke` 使用临时 DSH home 启动真实 web 宿主，验证桥接和重启后的会话读取，无需模型密钥。CI 在干净安装后运行这些检查。
 
 构建后运行 `pnpm test:browser`，需要已安装 Playwright Chromium，或通过 `CHROMIUM_PATH` 指定支持加载未打包扩展的 Chromium 可执行文件。测试会启动真实 DSH 和 Chromium，验证页面共享、开发者工具授权、输入、iframe 上传与定位，以及 CSS 修改。测试开启并确认跨站 iframe 的进程隔离，覆盖同源、跨源和嵌套 iframe 中的元素点击、输入与滚动。测试无需模型密钥，结果保存在 `.artifacts/browser-smoke/`。
 
-如果遇到 `cache.hydratePrepared is not a function`，更新仓库后重新运行 `pnpm install --frozen-lockfile` 和 `pnpm run build`，再重启 `pnpm start`。无需删除会话数据或清空全局缓存。
+构建扩展后运行 `pnpm test:uninstall`。设置界面测试使用 `pnpm test:uninstall:ui`，需要 Playwright Chromium。
 
 ## 安全
 
-- 桥路径在 `/api` 信任栅栏之外，自带 bearer token 认证。
-- Chrome 扩展的本地 Origin 保留零配置回环访问；Firefox Origin 是每次安装生成的 UUID，必须携带 bearer token。
-- 特权网关方法（`settings.*`/`credentials.*`/`host.open*`）对非回环来源一律拒绝。
-- 文本快照会遮盖密码和卡号值。截图直接捕获可见像素，不会遮盖字段；除非启用了完全控制，否则截图需要审批，页面共享设为「关闭」时会阻止截图。截图和对话图片使用 dsh 持久附件服务。开发者工具有独立的高权限授权。
-- 助手开始工作时会绑定当时的活动标签页（提交提示时绑定；直接调用浏览器工具时则在首次调用绑定）。用户手动切页后，后续浏览器操作会暂停，侧栏会询问让助手留在原页面还是跟随当前页面，并提供「跳转回到助手页面」把你自己正在看的标签页切回助手页面；选择留在原页面后允许在后台继续，除该按钮外扩展不会切换用户正在看的页面、也不会静默改绑。受控标签页关闭后也会暂停，直到用户显式选择当前页面。
-- 只有在侧栏打开、且页面共享不是「关闭」时才会捕获划选内容，密码和卡号字段永不读取。内容在发送之前始终留在扩展内部；移除、页面跳转或标签页关闭都会丢弃它；发送时与页面快照一样包在不可信内容边界内，来源标题和 URL 同样由页面提供，因此也放在边界之内。
-- 网页文字会标记为不可信输入。默认「自动共享」只按需读取受控标签页且不额外弹窗；对隐私敏感时可选择「每次询问」，或用「关闭」完全阻断读取。在「每次询问」模式下，读取弹窗可以仅允许一次，也可以持久切回自动读取；之后仍可在设置中关闭。读取的页面文字会发送给当前选择的模型。
-- 点击、输入、按键、导航、历史跳转和刷新默认失败关闭，必须由用户批准。可以只在当前侧栏会话中信任单个 origin（最后一个侧栏关闭或 Service Worker 重启即清空）；永久信任需在设置中显式管理。显式跨域 `browser_navigate` 和未知目标的历史跳转始终重新询问。
-- **允许模型完全控制浏览器**是显式的全局选择，只有设置保存成功后才会生效。启用后，页面读取、页面操作和标签页列出/跟随/关闭都不会再请求确认。调用在收到时固定其访问模式，因此开启完全控制不会追溯提升已经开始的受限调用。关闭会立即生效：取消尚未下发操作的调用，等待已经下发到浏览器的操作完成，再保存限制设置。快速重新开启也会在旧权限撤销完成前保持受限，并发保存会按请求顺序落盘。无论是否启用，浏览器受保护页面的 DOM 内容都无法访问。
+- 助手读取的页面文字和你发送的附件会交给当前选择的模型。
+- 页面内容共享可以选择**自动共享**（默认）、**每次询问**或**关闭**。
+- 文本快照会遮盖密码和卡号值；截图保留可见像素，不会遮盖字段。
+- 页面操作默认需要审批。你可以信任指定网站，或开启**允许模型完全控制浏览器**。开发者工具需要单独授权。
+- 切换标签页后，助手会询问接下来操作哪个页面。

@@ -19,7 +19,7 @@ export const TOKEN_FILE_NAME = 'ext-bridge-token'
 
 /**
  * Generate a fresh token as lowercase hex.
- * @param bytes - entropy bytes; defaults to DEFAULT_TOKEN_BYTES (256-bit).
+ * @param bytes - 随机数据的字节数，默认 32（256 位）。
  * @returns the hex token string.
  */
 export function generateToken(bytes: number = 32): string {

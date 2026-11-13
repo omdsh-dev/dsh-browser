@@ -48,9 +48,6 @@ export const HELLO_TIMEOUT_MS = 5_000
 /** Server-side ping cadence; the client answers `pong` to prove liveness. */
 export const PING_INTERVAL_MS = 30_000
 
-/** Default bytes of the generated bearer token (256-bit). */
-export const DEFAULT_TOKEN_BYTES = 32
-
 /** Default rendered-snapshot character budget. */
 export const DEFAULT_SNAPSHOT_MAX_CHARS = 32_000
 
@@ -175,16 +172,6 @@ export function isServerFrame(frame: BridgeFrame): frame is ServerFrame {
     || frame.t === 'tool.cancel'
     || frame.t === 'ping'
     || frame.t === 'error'
-}
-
-/**
- * Type guard: is this frame one the CLIENT may send? Server-only shapes
- * narrow out, so client-side consumers never dispatch on server vocabulary.
- * @param frame - parsed frame.
- * @returns true for client-sendable frames.
- */
-export function isClientFrame(frame: BridgeFrame): frame is ClientFrame {
-  return frame.t === 'hello' || frame.t === 'rpc' || frame.t === 'respond' || frame.t === 'tool.result' || frame.t === 'pong'
 }
 
 /**

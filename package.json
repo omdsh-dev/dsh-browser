@@ -13,7 +13,9 @@
     "typecheck": "pnpm --filter @yuxianglin/dsh-bridge-browser run typecheck && pnpm --filter dsh-browser-extension run typecheck",
     "check:runtime": "node scripts/check-runtime.mjs",
     "test:smoke": "node scripts/smoke-runtime.mjs",
-    "test:browser": "node scripts/smoke-browser.mjs"
+    "test:browser": "node scripts/smoke-browser.mjs",
+    "test:uninstall": "node --test scripts/tests/uninstall*.test.mjs",
+    "test:uninstall:ui": "node scripts/smoke-uninstall-ui.mjs"
   },
   "dependencies": {
     "@deepseek-ai/cordis-plugin-group": "~1.0.5",
@@ -21,7 +23,6 @@
     "@deepseek-ai/dsh-agent-default-model": "0.2.1-rc.5",
     "@deepseek-ai/dsh-anonymous-user-id": "0.2.1-rc.5",
     "@deepseek-ai/dsh-api-gateway": "0.2.1-rc.5",
-    "@deepseek-ai/dsh-api-remotes": "0.2.1-rc.5",
     "@deepseek-ai/dsh-atomic-write": "0.2.1-rc.5",
     "@deepseek-ai/dsh-authorization": "0.2.1-rc.5",
     "@deepseek-ai/dsh-bash-local": "0.2.1-rc.5",
@@ -29,7 +30,6 @@
     "@deepseek-ai/dsh-compaction": "0.2.1-rc.5",
     "@deepseek-ai/dsh-deepseek-account": "0.2.1-rc.5",
     "@deepseek-ai/dsh-fs": "0.2.1-rc.5",
-    "@deepseek-ai/dsh-hook-protocol": "0.2.1-rc.5",
     "@deepseek-ai/dsh-jobs": "0.2.1-rc.5",
     "@deepseek-ai/dsh-llm-deepseek": "0.2.1-rc.5",
     "@deepseek-ai/dsh-output-retention": "0.2.1-rc.5",
@@ -46,8 +46,6 @@
     "@deepseek-ai/dsh-shell": "0.2.1-rc.5",
     "@deepseek-ai/dsh-spill": "0.2.1-rc.5",
     "@deepseek-ai/dsh-subagent": "0.2.1-rc.5",
-    "@deepseek-ai/dsh-subagent-fork-in-process": "0.2.1-rc.5",
-    "@deepseek-ai/dsh-subagent-spawn-in-process": "0.2.1-rc.5",
     "@deepseek-ai/dsh-timeout": "0.2.1-rc.5",
     "@deepseek-ai/dsh-util-time": "0.2.1-rc.5",
     "@deepseek-ai/dsh-util-workspace-path": "0.2.1-rc.5",

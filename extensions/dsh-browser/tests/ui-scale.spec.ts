@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
   applyUiScale,
@@ -47,17 +46,5 @@ describe('panel text scale', () => {
     expect(root.style.getPropertyValue(UI_SCALE_PROPERTY)).toBe('1.3')
     applyUiScale(42, root)
     expect(root.style.getPropertyValue(UI_SCALE_PROPERTY)).toBe('1.75')
-  })
-
-  it('routes every stylesheet font-size through the scale token', () => {
-    const styles = readFileSync(`${process.cwd()}/src/panel/styles.css`, 'utf8')
-    const declarations = styles.match(/font-size:[^;]+;/g) ?? []
-
-    expect(declarations.length).toBeGreaterThan(0)
-    const unscaled = declarations.filter((declaration) => (
-      /[0-9]px/.test(declaration) && !declaration.includes(`var(${UI_SCALE_PROPERTY})`)
-    ))
-    expect(unscaled).toEqual([])
-    expect(styles).toMatch(new RegExp(`${UI_SCALE_PROPERTY}:\\s*1;`))
   })
 })

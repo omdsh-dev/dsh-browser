@@ -418,15 +418,6 @@ const LONGHANDS_OF: Record<string, readonly string[]> = {
   inset: ['top', 'right', 'bottom', 'left'],
 }
 
-/** Which shorthand family a property belongs to; longhands belong to their own. */
-export function propertyFamily(name: string): string {
-  const normalized = name.trim().toLowerCase()
-  for (const [shorthand, longhands] of Object.entries(LONGHANDS_OF)) {
-    if (normalized === shorthand || longhands.includes(normalized)) return shorthand
-  }
-  return normalized
-}
-
 /**
  * Canonicalize one declaration block.
  *

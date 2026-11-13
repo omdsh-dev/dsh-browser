@@ -38,6 +38,7 @@ import {
 import { canReturnToControlledTab } from './tab-handoff.ts'
 import { QuestionCard } from './QuestionCard.tsx'
 import { UpdateCard } from './UpdateCard.tsx'
+import { UninstallCard } from './UninstallCard.tsx'
 import { MessageImages } from './MessageImages.tsx'
 import type { QuestionAnswer } from './questions.ts'
 import {
@@ -2868,6 +2869,7 @@ export function App(): React.JSX.Element {
           <button className="secondary" onClick={() => setShowSettings(false)}>{copy.settings.cancel}</button>
         </div>
         <p className="hint">{copy.settings.snapshotHint(caps?.snapshotMaxChars ?? DEFAULT_SNAPSHOT_MAX_CHARS)}</p>
+        <UninstallCard copy={copy.uninstall} />
       </div>{approvalDialog}</>
     )
   }

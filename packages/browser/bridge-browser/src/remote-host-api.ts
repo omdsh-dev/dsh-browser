@@ -16,11 +16,8 @@ import type {
   HostRpcFailure,
   HostRpcResult,
 } from './host-api.ts'
-import { hostFailure, isRecord } from './host-api.ts'
-import {
-  ExtensionSessionRegistry,
-  shouldBridgeOwnQuestion,
-} from './extension-sessions.ts'
+import { isRecord } from './host-api.ts'
+import { ExtensionSessionRegistry } from './extension-sessions.ts'
 import type { RespondResult } from './protocol.ts'
 
 /** Structural subset of dsh 0.2.1's Host TypertGateway service. */
@@ -481,11 +478,7 @@ class RemoteHostApi implements BrowserHostApi {
   }
 
   private failure(error: unknown): HostRpcFailure {
-    try {
-      return this.gateway.wireStream.failure(error)
-    } catch {
-      return hostFailure(error)
-    }
+    return this.gateway.wireStream.failure(error)
   }
 
   private async sendRemoteEventResult(
@@ -790,11 +783,7 @@ class EventGeneration {
     }
     // Desktop-owned sessions keep the native waterfall. Only forward questions
     // for sessions the extension successfully created or prompted.
-    if (!shouldBridgeOwnQuestion({
-      hasExtensionConnection: true,
-      sessionId: value.agentId,
-      extensionSessions: this.extensionSessions,
-    })) {
+    if (!this.extensionSessions.has(value.agentId)) {
       const clientId = this.clientId
       if (clientId !== undefined) {
         await this.sendResult(clientId, value.eventId, { kind: 'next' }, this.signal)

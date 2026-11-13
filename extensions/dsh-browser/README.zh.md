@@ -6,7 +6,6 @@ dsh 的**浏览器操作端**：让模型直接读取并操作你在浏览器里
 
 浏览器页面以结构化文本和带编号的交互元素清单呈现。`browser_screenshot` 也可经批准后截取受控页面的可视区域。DSH 宿主声明图片能力时，侧栏接收 PNG、JPEG、WebP 和 GIF，并渲染会话中的持久图片附件。
 
-
 ## 模型能做什么
 
 | 能力 | 动作 | 说明 |
@@ -32,15 +31,6 @@ dsh 的**浏览器操作端**：让模型直接读取并操作你在浏览器里
 
 ## 架构
 
-```
-side panel (React) ◄─port─► background SW/事件页 ◄─WS─► dsh bridge plugin
-                                 │
-                  tabs.sendMessage (DSH_ACTION, DSH_SELECTION_WATCH)
-                                 ▲ DSH_SELECTION
-                                 ▼
-                        content script (snapshot/actions/privacy/selection)
-```
-
 - **background**（`src/background/`）：桥连接（token 认证 + 指数退避重连 + 保活）、网关 RPC 客户端，以及**失败关闭地分发工具到用户受控标签页**。
 - **content script**（`src/content/`）：纯文本快照（可读性主文 + 编号交互清单 + 表单字段）、**稳定编号**（`data-dsh-el`）、delta 变化、点击/输入/按键/滚动/导航动作、敏感字段掩码，以及带防抖的划选监听——只有侧栏打开且页面共享不是「关闭」时才会启用。
 - **panel**（`src/panel/`）：React 对话界面（可续接会话/历史/实时事件/设置）；图片选择和预检由宿主声明的限制控制，持久图片通过会话授权读取；消息以已消毒的 Markdown 渲染，`ask_user_question` 请求会显示成可直接作答的卡片，手动切页时显示控制权交接条，运行中的回合提供标准停止按钮，页面划选的段落显示为可移除的引用卡片，并在下一条消息中包在不可信内容边界里发送。
@@ -57,59 +47,11 @@ pnpm --filter dsh-browser-extension run test
 
 请在仓库根目录执行这些命令。Chrome 产物输出到 `extensions/dsh-browser/dist/`；Firefox 产物输出到 `extensions/dsh-browser/dist-firefox/`。
 
+开发扩展时，Chrome 从 `chrome://extensions` 加载 `extensions/dsh-browser/dist/`；Firefox 从 `about:debugging#/runtime/this-firefox` 加载 `extensions/dsh-browser/dist-firefox/manifest.json`。代码更新后需重新构建并重新加载。
+
 ## 安装与使用
 
-推荐的零配置命令无需安装 Git，也无需提前 clone：
-
-1. **构建并安装扩展**：
-
-   ```sh
-   curl -fsSL https://raw.githubusercontent.com/Lum1104/dsh-browser/refs/heads/main/scripts/install.sh | bash
-   ```
-
-   Windows 请改在 PowerShell 中运行：
-
-   ```powershell
-   $s="$env:TEMP\dsh-install.ps1"; irm https://raw.githubusercontent.com/Lum1104/dsh-browser/refs/heads/main/scripts/install.ps1 -OutFile $s; powershell -NoProfile -ExecutionPolicy Bypass -File $s
-   ```
-
-   脚本会把托管 workspace 下载到 `~/.dsh/dsh-browser`，构建桥插件，把它的官方 bundle 注册到本机 dsh 的 `web` profile，再构建扩展并把产物复制到稳定目录 `~/.dsh/browser-extension`，然后打开 `chrome://extensions`。开启开发者模式，选择「加载已解压的扩展程序」，加载扩展目录。再次运行该命令会更新托管安装。
-
-   clone 得到的 checkout 也使用同一个安装器，而且不会下载或覆盖源码：
-
-   ```sh
-   git clone https://github.com/Lum1104/dsh-browser.git
-   cd dsh-browser
-   ./scripts/install.sh
-   ```
-
-   Windows checkout 请运行 `.\scripts\install.ps1`。路径可以包含空格：安装器通过 profile 内的目录联接注册插件，不会把 checkout 的绝对路径写入 pnpm link 规格。
-
-2. **启动 dsh 并挂载桥插件**。可以使用 workspace 固定的运行时：
-
-   ```sh
-   cd ~/.dsh/dsh-browser && pnpm start
-   ```
-
-   如果使用 clone，请改为在仓库根目录运行 `pnpm start`。
-
-   或使用受支持的精确公开版本：
-
-   ```sh
-   npx @deepseek-ai/dsh@0.2.1-rc.5 web
-   ```
-
-   两种命令都会从本机 `web` profile 加载同一个 bundle。默认端口为 3080；如被占用，可追加 `--port <port>`。
-
-   **DSH Desktop 用户**：桌面版启动 Host 时用 `--port 0`，本地 Web 端口每次启动都由系统重新分配，固定端口列表无法预知。因此桥接插件会同时在固定的回环信标端口（`43189`–`43198`，取第一个空闲端口）上通告真实桥地址。面板打开时探测一次：已填地址优先尝试，只有回环地址连不上时才自动探测一次。都没找到时状态显示「未找到服务」，不再重试；此时打开**设置 → 自动检测**列出本机所有实例并点选，或直接手填 `http://127.0.0.1:<端口>`。若想固定端口，可在 `~/.dsh/profiles/desktop/cordis.patch.yml` 覆盖 `webserver` 行——patch 的 `config` 是整体替换，务必把 `host` 一起写出。
-
-   加载或重新加载扩展本身是被动的：只有打开侧栏后，扩展才会探测本机端口并创建 WebSocket。用户已建立的健康连接可在侧栏关闭后继续用于后台审批；但连接一旦掉线或被另一浏览器替换，没有打开侧栏时就不会重连。
-
-3. **开始使用**：打开普通的 `http://` 或 `https://` 页面，点击 DeepSeek 鲸鱼图标打开侧边栏。两个构建都会自动探测本机 dsh。Chrome 回环连接无需地址或 Token；Firefox 的 `moz-extension://` UUID 不能证明扩展身份，必须在设置中填入 `~/.dsh/ext-bridge-token`。可以直接对话，或先点「读取页面」。
-
-页面即使在扩展安装或重载之前已经打开，也会在第一次操作时自动补加载内容脚本，无需手动刷新。`chrome://`、Chrome Web Store 等浏览器内置或受保护页面只提供标签页元数据，以及浏览器级 HTTP(S) 导航、后退、前进和刷新；不能读取或操作其 DOM。
-
-如果只开发扩展，Chrome 从 `chrome://extensions` 加载 `extensions/dsh-browser/dist/`；Firefox 运行 `build:firefox` 后，从 `about:debugging#/runtime/this-firefox` 加载 `extensions/dsh-browser/dist-firefox/manifest.json`。代码更新后需重新构建并重新加载。
+安装、更新、启动和卸载方式见根目录 README 的[详细安装与使用](../../README.zh.md#详细安装与使用)。
 
 ## 输入区控制：权限模式、模型、命令与 Skill
 
@@ -151,7 +93,5 @@ Chrome 使用 `sidePanel`，Firefox 使用 `sidebar_action`。两者都申请 `s
 - 开发者工具需要 Chrome 125 以上、设置或会话授权或逐次审批，以及可用的调试连接。连接保持期间会显示 Chrome 的调试提示，包括网络抓包期间。
 - 标签页绑定属于整个扩展连接，而不是单个对话会话。
 - 可访问的跨源 iframe 会进入快照，并通过稳定的 `(frame, index)` 地址执行操作；受保护或已销毁的 frame 会标记为不可访问，不影响整页快照。
-- 验证码/纯图片按钮无法处理——工具结果会标注"存在无文本可访问名的元素"，提示用户手动完成该步。
 - 令牌无自动轮换。
 - `browser_press` 的合成按键不触发浏览器原生默认行为，例如 Tab 焦点移动、方向键滚动或 Enter 激活。Chrome 的真实输入通道支持这些操作；Firefox 使用合成输入。
-- `browser_wait` 以加载完成 + 固定静默窗口为准，不观察持续 DOM 更新（连续刷新的 SPA 可能被报为稳定）。

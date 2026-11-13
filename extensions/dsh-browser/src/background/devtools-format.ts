@@ -17,7 +17,7 @@ import {
   REDACTED,
   truncateText,
 } from './devtools-serialization.ts'
-import type { ConsoleEntry, ConsoleLevel, NetworkEntry } from './devtools-network.ts'
+import type { ConsoleEntry, NetworkEntry } from './devtools-network.ts'
 import type { ElementView } from './devtools-elements.ts'
 /** Render one inspected element report. */
 export function renderElement(view: ElementView): string {
@@ -97,11 +97,6 @@ export function renderConsoleLogs(entries: readonly ConsoleEntry[], sinceIndex: 
     lines.push(`[${entry.index}] ${entry.level}: ${entry.text}`)
   }
   return lines.join('\n')
-}
-
-/** Render one evaluation result, already formatted by the serialization layer. */
-export function renderEvaluation(text: string, ok: boolean): string {
-  return `${ok ? 'Evaluation result:' : 'Evaluation failed:'}\n${text}`
 }
 
 /** Render the capture control answer. */
@@ -203,9 +198,4 @@ export function renderBody(
   lines.push('', body)
   if (options.truncated) lines.push('', '(body truncated to the configured budget)')
   return lines.join('\n')
-}
-
-/** Levels are exposed so the tool layer can validate its own filter input. */
-export function isConsoleLevel(value: string): value is ConsoleLevel {
-  return value === 'log' || value === 'info' || value === 'warning' || value === 'error' || value === 'exception'
 }

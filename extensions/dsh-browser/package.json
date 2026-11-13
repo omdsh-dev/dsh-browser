@@ -1,6 +1,6 @@
 {
   "name": "dsh-browser-extension",
-  "description": "Chrome and Firefox MV3 extension: sidebar chat with a local dsh instance and text-only read/operate of a user-controlled tab through the dsh browser bridge",
+  "description": "Chrome and Firefox MV3 extension: sidebar chat and browser tools for a local dsh instance",
   "version": "0.1.4",
   "author": "Yuxiang Lin",
   "license": "MIT",
@@ -30,7 +30,6 @@
     "jsdom": "^26.1.0",
     "typescript": "^5.6.2",
     "vite": "^6.0.0",
-    "vite-tsconfig-paths": "^6.1.1",
     "vitest": "^4.1.11"
   }
 }

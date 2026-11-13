@@ -4,7 +4,7 @@
  * @module
  */
 
-import { MODIFIER_BITS, modifierMask, type ModifierName } from './keys.ts'
+import { modifierMask, type ModifierName } from './keys.ts'
 
 /** One tab's input state. */
 export class InputState {
@@ -61,6 +61,3 @@ export class InputStateStore {
     this.states.clear()
   }
 }
-
-/** Modifier bitmask constant re-exported for callers that build chords. */
-export { MODIFIER_BITS }

@@ -385,7 +385,7 @@ export class BridgeServer {
         void this.handleRespond(frame)
         break
       case 'tool.result':
-        this.settleTool(frame.id, frame.ok, frame.ok ? frame.result : frame.error)
+        this.settleTool(frame)
         break
       case 'pong':
       case 'hello':
@@ -512,13 +512,13 @@ export class BridgeServer {
     }
   }
 
-  private settleTool(id: string, ok: boolean, payload: unknown): void {
-    const pending = this.pendingTools.get(id)
+  private settleTool(frame: Extract<ClientFrame, { t: 'tool.result' }>): void {
+    const pending = this.pendingTools.get(frame.id)
     if (pending === undefined) return
     clearTimeout(pending.timer)
-    this.pendingTools.delete(id)
-    if (ok) pending.resolve(payload)
-    else pending.reject(new BridgeToolError(payloadCode(payload), payloadMessage(payload)))
+    this.pendingTools.delete(frame.id)
+    if (frame.ok) pending.resolve(frame.result)
+    else pending.reject(new BridgeToolError(frame.error.code, frame.error.message || 'browser action failed'))
   }
 
   /** Close the current connection (if any) and settle its in-flight calls. */
@@ -559,36 +559,4 @@ function orderedSessionId(frame: Extract<ClientFrame, { t: 'rpc' }>): string | u
   if (typeof frame.payload !== 'object' || frame.payload === null || Array.isArray(frame.payload)) return undefined
   const sessionId = (frame.payload as Record<string, unknown>).sessionId
   return typeof sessionId === 'string' ? sessionId : undefined
-}
-
-/**
- * Tool error payload → stable code. The wire parser enforces string fields,
- * so the fallback branches are parser-gated; exported so the fallback
- * contract is unit-testable directly.
- * @param payload - extension-reported error payload.
- * @returns the stable error code.
- */
-export function payloadCode(payload: unknown): ToolErrorCode {
-  if (typeof payload === 'object' && payload !== null) {
-    const code = (payload as { code?: unknown }).code
-    if (typeof code === 'string') return code as ToolErrorCode
-    return 'internal'
-  }
-  return 'internal'
-}
-
-/**
- * Tool error payload → message. The wire parser enforces string fields, so
- * the fallback branches are parser-gated; exported so the fallback contract
- * is unit-testable directly.
- * @param payload - extension-reported error payload.
- * @returns the human-readable message.
- */
-export function payloadMessage(payload: unknown): string {
-  if (typeof payload === 'object' && payload !== null) {
-    const message = (payload as { message?: unknown }).message
-    if (typeof message === 'string' && message.length > 0) return message
-    return 'browser action failed'
-  }
-  return 'browser action failed'
 }

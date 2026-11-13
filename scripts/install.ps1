@@ -455,14 +455,9 @@ New-Item -ItemType Directory -Path $DistDir -Force | Out-Null
 Sync-Directory -Source (Join-Path $Ext 'dist') -Destination $DistDir
 
 $InstallMode = if (Test-Path -LiteralPath (Join-Path $Root '.managed-by-install-sh') -PathType Leaf) { 'managed' } else { 'checkout' }
-$InstallInfo = [ordered]@{ schemaVersion = 1; mode = $InstallMode }
-if ($InstallMode -eq 'checkout') { $InstallInfo['sourceRoot'] = $Root }
-# ConvertTo-Json escapes the backslashes in a Windows path; hand-built JSON would not.
-$InstallInfoJson = ($InstallInfo | ConvertTo-Json -Depth 3) + "`n"
-[System.IO.File]::WriteAllText(
-  (Join-Path $DistDir 'install-info.json'),
-  $InstallInfoJson,
-  (New-Object System.Text.UTF8Encoding $false))
+& node (Join-Path $Root 'scripts\write-install-info.mjs') `
+  (Join-Path $DistDir 'install-info.json') $InstallMode $Root $DshHomeDir
+if ($LASTEXITCODE -ne 0) { Stop-Install '写入安装信息失败。' 'Writing install metadata failed.' }
 
 $ClipboardReady = Set-ClipboardText $DistDir
 $ChromeOpened = Start-ExtensionsPage (Get-BrowserPath)

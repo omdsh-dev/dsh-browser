@@ -2,7 +2,7 @@ import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import WebSocket from 'ws'
-import { BridgeServer, BridgeToolError, isLoopbackAddress, messageToText, payloadCode, payloadMessage } from '../src/server.ts'
+import { BridgeServer, BridgeToolError, isLoopbackAddress, messageToText } from '../src/server.ts'
 import {
   BRIDGE_INJECT_BROWSER_SNAPSHOT_METHOD,
   BRIDGE_SESSION_PURGE_METHOD,
@@ -111,17 +111,6 @@ describe('BridgeServer', () => {
     expect(messageToText([Buffer.from('a'), Buffer.from('b')])).toBe('ab')
     expect(messageToText(Buffer.from('hi'))).toBe('hi')
     expect(messageToText(new TextEncoder().encode('x').buffer)).toBe('x')
-  })
-
-  it('extracts tool error codes and messages with parser-gated fallbacks', () => {
-    expect(payloadCode({ code: 'timeout', message: 'm' })).toBe('timeout')
-    expect(payloadCode({ code: 42, message: 'm' })).toBe('internal')
-    expect(payloadCode('garbage')).toBe('internal')
-    expect(payloadCode(null)).toBe('internal')
-    expect(payloadMessage({ code: 'x', message: 'm' })).toBe('m')
-    expect(payloadMessage({ code: 'x', message: '' })).toBe('browser action failed')
-    expect(payloadMessage({ code: 'x', message: 42 })).toBe('browser action failed')
-    expect(payloadMessage('garbage')).toBe('browser action failed')
   })
 
   it('reports negotiated developer-tools support and notifies on each hello', async () => {
@@ -525,7 +514,10 @@ describe('BridgeServer', () => {
     ws.close()
   })
 
-  it('propagates extension-reported tool errors', async () => {
+  it.each([
+    ['blocked', 'blocked'],
+    ['', 'browser action failed'],
+  ])('propagates the extension-reported tool error %j', async (message, expectedMessage) => {
     const h = await startBridge()
     harnesses.push(h)
     const { ws, frames } = await connect(h.url)
@@ -534,9 +526,9 @@ describe('BridgeServer', () => {
     const result = h.bridge.requestTool('browser_navigate', { url: 'https://x' }, new AbortController().signal)
     await waitFor(() => frames.some((f) => f.t === 'tool.call'))
     const call = frames.find((f) => f.t === 'tool.call') as Extract<BridgeFrame, { t: 'tool.call' }>
-    send(ws, { t: 'tool.result', id: call.id, ok: false, error: { code: 'action-failed', message: 'blocked' } })
+    send(ws, { t: 'tool.result', id: call.id, ok: false, error: { code: 'action-failed', message } })
     await expect(result).rejects.toBeInstanceOf(BridgeToolError)
-    await expect(result).rejects.toMatchObject({ code: 'action-failed', message: 'blocked' })
+    await expect(result).rejects.toMatchObject({ code: 'action-failed', message: expectedMessage })
     ws.close()
   })
 

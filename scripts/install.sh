@@ -346,16 +346,8 @@ if [ -f "$ROOT/.managed-by-install-sh" ]; then
 else
   INSTALL_MODE="checkout"
 fi
-node -e '
-  const { writeFileSync } = require("node:fs");
-  const [filename, mode, sourceRoot] = process.argv.slice(1);
-  const info = {
-    schemaVersion: 1,
-    mode,
-    ...(mode === "checkout" ? { sourceRoot } : {}),
-  };
-  writeFileSync(filename, `${JSON.stringify(info, null, 2)}\n`);
-' "$DIST_DIR/install-info.json" "$INSTALL_MODE" "$ROOT"
+node "$ROOT/scripts/write-install-info.mjs" \
+  "$DIST_DIR/install-info.json" "$INSTALL_MODE" "$ROOT" "$DSH_HOME_DIR"
 if copy_to_clipboard "$DIST_DIR"; then
   CLIPBOARD_READY=1
 else
