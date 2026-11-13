@@ -101,7 +101,7 @@ interface InvokeTarget {
 }
 
 interface SessionSnapshot {
-  /** Inclusive Host log tip from session/follow; required for later session/page calls. */
+  /** Inclusive Host log tip from session/follow. */
   readonly cursor: number
   readonly records: readonly unknown[]
   readonly hasMore: boolean
@@ -128,8 +128,6 @@ class RemoteHostApi implements BrowserHostApi {
   /** One Peer speaks for every call and stream this extension connection opens. */
   private readonly peer: HostPeerLike
   private readonly extensionSessions = new ExtensionSessionRegistry()
-  /** Last known session/follow tip per Session; drives session/page throughSeq. */
-  private readonly historyCursors = new Map<string, number>()
   private activeEvents: EventGeneration | undefined
 
   constructor(
@@ -204,7 +202,6 @@ class RemoteHostApi implements BrowserHostApi {
       this.peer,
       this.sendRemoteEventResult.bind(this),
       this.extensionSessions,
-      this.noteHistoryCursor.bind(this),
       signal,
     )
     const previous = this.activeEvents
@@ -238,14 +235,12 @@ class RemoteHostApi implements BrowserHostApi {
     }
     try {
       if (beforeSeq !== undefined) {
-        const throughSeq = await this.historyThroughSeq(sessionId, call.signal)
         const page = await this.invoke({
           namespace: 'session',
-          method: 'page',
+          method: 'events',
           args: {
             request: {
               address: { kind: 'session', sessionId },
-              throughSeq,
               beforeSeq,
               ...(maxMessages === undefined ? {} : { maxMessages }),
             },
@@ -258,7 +253,6 @@ class RemoteHostApi implements BrowserHostApi {
       const snapshot = this.activeEvents === undefined
         ? await oneShotSessionSnapshot(this.gateway, this.peer, sessionId, call.signal, maxMessages)
         : await this.activeEvents.openSessionHistory(sessionId, call.signal, maxMessages)
-      this.noteHistoryCursor(sessionId, snapshot.cursor)
       return { ok: true, value: historyValue(snapshot) }
     } catch (error: unknown) {
       return { ok: false, error: this.failure(error) }
@@ -430,32 +424,6 @@ class RemoteHostApi implements BrowserHostApi {
     }
   }
 
-  /**
-   * Resolve a Host-legal throughSeq for older history pages.
-   * Never invent Number.MAX_SAFE_INTEGER — session/page rejects tips past the log cursor.
-   */
-  private async historyThroughSeq(sessionId: string, signal: AbortSignal): Promise<number> {
-    const cached = this.historyCursors.get(sessionId)
-    if (cached !== undefined) return cached
-    const snapshot = this.activeEvents === undefined
-      ? await oneShotSessionSnapshot(this.gateway, this.peer, sessionId, signal)
-      : await this.activeEvents.openSessionHistory(sessionId, signal)
-    this.noteHistoryCursor(sessionId, snapshot.cursor)
-    const throughSeq = this.historyCursors.get(sessionId)
-    if (throughSeq === undefined) {
-      throw new TypeError('session/follow snapshot did not provide a usable history cursor')
-    }
-    return throughSeq
-  }
-
-  private noteHistoryCursor(sessionId: string, cursor: number): void {
-    // Host session/page refuses throughSeq past the durable tip; MAX_SAFE_INTEGER is
-    // only a UI sentinel elsewhere and must never be forwarded as a page tip.
-    if (!Number.isSafeInteger(cursor) || cursor < -1 || cursor === Number.MAX_SAFE_INTEGER) return
-    const previous = this.historyCursors.get(sessionId)
-    if (previous === undefined || cursor > previous) this.historyCursors.set(sessionId, cursor)
-  }
-
   private async workspaceList(call: HostRpcCall): Promise<HostRpcResult> {
     try {
       const controller = new AbortController()
@@ -549,6 +517,7 @@ class EventGeneration {
   private readonly pendingQuestions = new Map<string, PendingQuestion>()
   private clientId: string | undefined
   private followAbort: AbortController | undefined
+  private followOpening: Promise<SessionSnapshot> | undefined
   private followedSessionId: string | undefined
   private followRevision = 0
   private disposed = false
@@ -558,7 +527,6 @@ class EventGeneration {
     private readonly peer: HostPeerLike,
     private readonly sendResult: SendRemoteEventResult,
     private readonly extensionSessions: ExtensionSessionRegistry,
-    private readonly onHistoryCursor: (sessionId: string, cursor: number) => void,
     outerSignal: AbortSignal,
   ) {
     this.signal = AbortSignal.any([outerSignal, this.lifetime.signal, this.peer.signal])
@@ -577,12 +545,21 @@ class EventGeneration {
     callSignal: AbortSignal,
     maxMessages?: number,
   ): Promise<SessionSnapshot> {
-    return this.openSessionFollow(sessionId, callSignal, maxMessages)
+    const pending = this.openSessionFollow(sessionId, callSignal, maxMessages)
+    this.followOpening = pending
+    try {
+      return await pending
+    } finally {
+      if (this.followOpening === pending) this.followOpening = undefined
+    }
   }
 
   async ensureSessionFollow(sessionId: string, callSignal: AbortSignal): Promise<void> {
-    if (this.followedSessionId === sessionId && this.followAbort?.signal.aborted === false) return
-    await this.openSessionFollow(sessionId, callSignal)
+    if (this.followedSessionId === sessionId && this.followAbort?.signal.aborted === false) {
+      await this.followOpening
+      return
+    }
+    await this.openSessionHistory(sessionId, callSignal)
   }
 
   async respond(rpcId: string, result: RespondResult, signal: AbortSignal): Promise<unknown> {
@@ -621,7 +598,18 @@ class EventGeneration {
     this.followAbort = controller
     this.followedSessionId = sessionId
     const signal = AbortSignal.any([this.signal, callSignal, controller.signal])
+    const iterators: AsyncIterator<unknown>[] = []
     try {
+      // 先建立投影订阅，再读取基线，保证打开期间的变化不会丢失。
+      const projections = await openWireStream(this.gateway, this.peer, 'session/observeProjections', {
+        args: { request: { sessionId } },
+      }, signal)
+      const projectionIterator = projections[Symbol.asyncIterator]()
+      iterators.push(projectionIterator)
+      const ready = await projectionIterator.next()
+      if (ready.done || !isRecord(ready.value) || ready.value.type !== 'ready') {
+        throw new TypeError('session/observeProjections did not begin with ready')
+      }
       const source = await openWireStream(this.gateway,
         this.peer,
         'session/follow',
@@ -629,6 +617,7 @@ class EventGeneration {
           args: {
             request: {
               address: { kind: 'session', sessionId },
+              activate: true,
               assistantStream: true,
               ...(maxMessages === undefined ? {} : { maxMessages }),
             },
@@ -637,17 +626,22 @@ class EventGeneration {
         signal,
       )
       const iterator = source[Symbol.asyncIterator]()
+      iterators.push(iterator)
       const first = await iterator.next()
       if (first.done || !isSessionSnapshot(first.value)) {
-        await iterator.return?.()
         throw new TypeError('session/follow did not begin with a snapshot')
       }
       if (revision !== this.followRevision || signal.aborted) {
-        await iterator.return?.()
         signal.throwIfAborted()
         throw new Error('browser bridge Session follower was replaced while opening')
       }
-      this.onHistoryCursor(sessionId, first.value.cursor)
+      const states = await openWireStream(this.gateway, this.peer, 'session/observeState', {
+        args: { request: { sessionId } },
+      }, signal)
+      const stateIterator = states[Symbol.asyncIterator]()
+      iterators.push(stateIterator)
+      signal.throwIfAborted()
+      if (revision !== this.followRevision) throw new Error('browser bridge Session follower was replaced while opening')
       const snapshotId = first.value.assistantStream === undefined ? undefined : crypto.randomUUID()
       // Publish the reconnect prefix before any suffix chunks. RPC responses
       // and pushed events can otherwise race, dropping the beginning of an
@@ -663,6 +657,10 @@ class EventGeneration {
           },
         })
       }
+      const projectionSeq = isRecord(first.value.projections) && typeof first.value.projections.asOfSeq === 'number'
+        ? first.value.projections.asOfSeq : first.value.cursor
+      this.track(this.pumpSessionObserver(sessionId, revision, projectionIterator, signal, 'projection', projectionSeq))
+      this.track(this.pumpSessionObserver(sessionId, revision, stateIterator, signal, 'state'))
       this.track(this.pumpSessionEvents(sessionId, revision, iterator, signal))
       return {
         cursor: first.value.cursor,
@@ -673,6 +671,8 @@ class EventGeneration {
         ...(snapshotId === undefined ? {} : { snapshotId }),
       }
     } catch (error: unknown) {
+      controller.abort(error)
+      await Promise.all(iterators.map(iterator => iterator.return?.()))
       if (revision === this.followRevision) {
         this.followedSessionId = undefined
         this.followAbort = undefined
@@ -706,8 +706,6 @@ class EventGeneration {
         if (!isSessionEventEntry(next.value)) {
           throw new TypeError('session/follow emitted an invalid incremental frame')
         }
-        const seq = next.value.event.seq
-        if (typeof seq === 'number') this.onHistoryCursor(sessionId, seq)
         this.queue.push({
           rpcId: crypto.randomUUID(),
           method: 'session/event',
@@ -722,9 +720,49 @@ class EventGeneration {
     } finally {
       await iterator.return?.()
       if (revision === this.followRevision) {
+        this.followAbort?.abort(new Error('browser bridge Session follower ended'))
         this.followedSessionId = undefined
         this.followAbort = undefined
       }
+    }
+  }
+
+  private async pumpSessionObserver(
+    sessionId: string,
+    revision: number,
+    iterator: AsyncIterator<unknown>,
+    signal: AbortSignal,
+    kind: 'projection' | 'state',
+    baselineSeq = -1,
+  ): Promise<void> {
+    try {
+      while (!signal.aborted) {
+        const next = await iterator.next()
+        if (signal.aborted || revision !== this.followRevision) return
+        if (next.done) throw new Error(`session ${kind} observation ended unexpectedly`)
+        const value = next.value
+        if (kind === 'projection') {
+          if (!isRecord(value) || value.type !== 'projection' || !Number.isSafeInteger(value.seq)
+            || !Array.isArray(value.changes)
+            || !value.changes.every(change => isRecord(change) && typeof change.key === 'string' && 'val' in change)) {
+            throw new TypeError('session/observeProjections emitted an invalid frame')
+          }
+          if ((value.seq as number) <= baselineSeq) continue
+          baselineSeq = value.seq as number
+          this.queue.push({ rpcId: crypto.randomUUID(), method: 'session/projection', payload: { sessionId, ...value } })
+        } else {
+          if (!isRecord(value) || !Number.isSafeInteger(value.cursor)
+            || typeof value.active !== 'boolean' || typeof value.running !== 'boolean'
+            || (value.queue !== null && !Array.isArray(value.queue)) || !Array.isArray(value.pendingInput)) {
+            throw new TypeError('session/observeState emitted an invalid state')
+          }
+          this.queue.push({ rpcId: crypto.randomUUID(), method: 'session/state', payload: { sessionId, ...value } })
+        }
+      }
+    } catch (error: unknown) {
+      if (!signal.aborted && revision === this.followRevision) throw error
+    } finally {
+      await iterator.return?.()
     }
   }
 
@@ -860,6 +898,7 @@ function invokeTarget(call: HostRpcCall): InvokeTarget | { readonly error: HostR
     case 'session.create':
     case 'session.selectModel':
     case 'session.attachment':
+    case 'session.state':
     case 'session.cancel':
     case 'workspace.create':
     case 'workspace.archiveSession': {
@@ -927,6 +966,7 @@ async function oneShotSessionSnapshot(
       args: {
         request: {
           address: { kind: 'session', sessionId },
+          activate: false,
           assistantStream: true,
           ...(maxMessages === undefined ? {} : { maxMessages }),
         },
@@ -968,7 +1008,7 @@ function historyValue(snapshot: SessionSnapshot): Record<string, unknown> {
 
 function historyPageValue(page: unknown): Record<string, unknown> {
   if (!isRecord(page) || !Array.isArray(page.records) || typeof page.hasMore !== 'boolean') {
-    throw new TypeError('session/page returned an invalid history page')
+    throw new TypeError('session/events returned an invalid history page')
   }
   return historyValue({
     cursor: -1,

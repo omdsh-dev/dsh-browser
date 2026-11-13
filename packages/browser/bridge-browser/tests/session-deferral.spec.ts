@@ -103,7 +103,7 @@ describe('withSessionDeferral', () => {
     const created = await wrapped.call(request('session.create', { cwd: '/work' }))
     if (!created.ok) throw new Error('create failed')
     const id = (created.value as { sessionId: string }).sessionId
-    const prompt = request('session.prompt', { sessionId: id, mode: 'queue', content: [] }, 'prompt')
+    const prompt = request('session.prompt', { sessionId: id, mode: 'queue', content: [{ type: 'text', text: 'Summarize this page.' }] }, 'prompt')
 
     await wrapped.call(prompt)
 
@@ -206,7 +206,7 @@ describe('withSessionDeferral', () => {
       value: { selected: { provider: 'deepseek-official', model: 'deepseek-v4-pro' } },
     })
 
-    await wrapped.call(request('session.prompt', { sessionId: id, mode: 'queue', content: [] }, 'prompt'))
+    await wrapped.call(request('session.prompt', { sessionId: id, mode: 'queue', content: [{ type: 'text', text: 'Summarize this page.' }] }, 'prompt'))
     expect(call).toHaveBeenCalledWith(expect.objectContaining({
       method: 'session.selectModel',
       payload: { sessionId: id, provider: 'deepseek-official', model: 'deepseek-v4-pro' },
@@ -349,7 +349,7 @@ describe('withSessionDeferral', () => {
       value: { current: 'danger-full-access', provisional: true },
     })
 
-    await wrapped.call(request('session.prompt', { sessionId: id, mode: 'queue', content: [] }, 'prompt'))
+    await wrapped.call(request('session.prompt', { sessionId: id, mode: 'queue', content: [{ type: 'text', text: 'Summarize this page.' }] }, 'prompt'))
     expect(applied).toHaveBeenCalledWith(expect.objectContaining({
       method: 'session.setPermission',
       payload: { sessionId: id, preset: 'danger-full-access' },

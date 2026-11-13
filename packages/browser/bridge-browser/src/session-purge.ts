@@ -49,6 +49,8 @@ export interface SessionPurgeDeps {
   acquireOwnership(sessionId: string): Promise<{ close(): Promise<void> }>
   /** Archive while the durable session still exists and exclusive ownership is held. */
   archiveSession(sessionId: string): Promise<void>
+  /** 等待宿主完成归档触发的 worktree 清理，再移除会话日志。 */
+  waitForArchiveCleanup?(sessionId: string): Promise<void>
 }
 
 /**
@@ -127,6 +129,7 @@ export async function purgeSessionFiles(deps: SessionPurgeDeps, sessionId: strin
     // succeeds only accidentally when its header cache already knows this id.
     await deps.archiveSession(sessionId)
     archived = true
+    await deps.waitForArchiveCleanup?.(sessionId)
     for (const target of targets) {
       if (!(await lstat(target)).isDirectory()) throw new Error(`session directory changed: ${target}`)
       // Re-scan after write-open: opening an old log may materialize V3.

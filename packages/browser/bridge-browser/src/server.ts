@@ -61,6 +61,7 @@ const PRIVILEGED_METHODS = new Set([
 const ORDERED_SESSION_METHODS = new Set([
   BRIDGE_INJECT_BROWSER_SNAPSHOT_METHOD,
   'session.prompt',
+  'session.state',
   'session.cancel',
 ])
 

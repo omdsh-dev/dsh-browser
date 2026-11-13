@@ -41,7 +41,7 @@ const MessageImage = memo(function MessageImage({
     setFailed(false)
     void api.rpc('session.attachment', {
       sessionId,
-      attachmentId: attachment.attachmentId,
+      attachment,
     }).then((value) => {
       if (!current) return
       const url = attachmentResponseDataUrl(value, attachment)

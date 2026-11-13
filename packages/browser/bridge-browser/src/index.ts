@@ -24,6 +24,8 @@ import type {} from '@deepseek-ai/dsh-attachment'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-session-persistence'
+import type {} from '@deepseek-ai/dsh-session-query'
+import type {} from '@deepseek-ai/dsh-experimental-worktree'
 import type { WebRoute, WebUpgradeRoute } from '@deepseek-ai/dsh-host-webserver'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { BridgeServer } from './server.ts'
@@ -138,10 +140,10 @@ export async function apply(ctx: Context, resolved: ResolvedConfig): Promise<voi
   const gateway = ctx.get('typertGateway') as unknown as GatewayCandidate | undefined
   const connection = ctx.get('connection') as unknown as HostConnectionLike | undefined
   if (gateway === undefined || !hasRemoteWireStream(gateway)) {
-    throw new Error('bridge-browser: dsh 0.2.1-rc.5 is required (Gateway wireStream unavailable)')
+    throw new Error('bridge-browser: dsh 0.2.2-rc.2 is required (Gateway wireStream unavailable)')
   }
   if (connection === undefined || typeof connection.createPeer !== 'function') {
-    throw new Error('bridge-browser: dsh 0.2.1-rc.5 is required (connection.createPeer unavailable)')
+    throw new Error('bridge-browser: dsh 0.2.2-rc.2 is required (connection.createPeer unavailable)')
   }
   const tokenRes = await resolveToken(resolved.token)
   mountBridge(ctx, resolved, tokenRes, createRemoteHostApi(gateway, connection))
@@ -211,6 +213,17 @@ function mountBridge(
           signal: new AbortController().signal,
         })
         if (!archived.ok) throw new Error(archived.error.message)
+      },
+      waitForArchiveCleanup: async (id) => {
+        const worktrees = ctx.get('worktrees')
+        if (worktrees === undefined) return
+        const query = ctx.get('sessionQuery')
+        if (query === undefined) throw new Error('session query is required to finish worktree cleanup')
+        const session = await query.inspectSession(id as Parameters<typeof query.inspectSession>[0], session => session)
+        const pending = await worktrees.cleanupOf(session, null)
+        const cleanup = pending?.status === 'scheduled'
+          ? await worktrees.cleanupOf(session, pending.revision) : pending
+        if (cleanup?.status === 'failed') throw new Error('worktree cleanup failed')
       },
     }
     await purgeSessionFiles(deps, sessionId)
