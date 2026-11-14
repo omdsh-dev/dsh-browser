@@ -1200,7 +1200,7 @@ export function App(): React.JSX.Element {
     if (frame.t !== 'event') return
     if (frame.frame.method === 'session/state') {
       const { sessionId, ...observed } = frame.frame.payload as SessionState & { sessionId: string }
-      observationsRef.current.setState(sessionId, observed)
+      if (!observationsRef.current.setState(sessionId, observed)) return
       sessionRuntimeRef.current.setRunning(sessionId, observed.running)
       applyObservedSession(sessionId)
       return
@@ -1409,6 +1409,8 @@ export function App(): React.JSX.Element {
     }
     observationsRef.current.baseline(id, history.projections ?? { asOfSeq: -1, values: {} })
     applyObservedSession(id)
+    void refreshSessionModels(id)
+    void refreshSessionPermissions(id)
     const historyTitle = latestSessionTitle(events)
     if (historyTitle !== undefined) setSessionTitle(historyTitle)
     setRows(mergeHistoryRows(events, nextSeq, locale))
@@ -2151,14 +2153,6 @@ export function App(): React.JSX.Element {
     setError(null)
     try {
       await api.rpc('session.cancel', { sessionId: id })
-      const observed = await api.rpc<SessionState>('session.state', { sessionId: id })
-      observationsRef.current.setState(id, observed)
-      sessionRuntimeRef.current.setRunning(id, observed.running)
-      sessionRuntimeRef.current.clearQuestions(id)
-      if (sessionRef.current === id) {
-        applyObservedSession(id)
-        clearQuestions()
-      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {

@@ -21,8 +21,11 @@ export class SessionObservations {
   private readonly states = new Map<string, SessionState>()
   private readonly projections = new Map<string, Map<string, { seq: number; value: unknown }>>()
 
-  setState(sessionId: string, state: SessionState): void {
+  setState(sessionId: string, state: SessionState): boolean {
+    const previous = this.states.get(sessionId)
+    if (previous !== undefined && state.cursor < previous.cursor) return false
     this.states.set(sessionId, state)
+    return true
   }
 
   state(sessionId: string): SessionState | undefined {
@@ -51,7 +54,7 @@ export class SessionObservations {
     const ending = this.value(sessionId, 'conversationContinuation')
     const state = this.states.get(sessionId)
     return typeof ending === 'number' && Number.isSafeInteger(ending) && ending >= 0
-      && state !== undefined && !state.running && state.pendingInput.length === 0
+      && state !== undefined && state.cursor >= ending && !state.running && state.pendingInput.length === 0
       && (state.queue === null || state.queue.every(item => item.placement === 'context'))
   }
 

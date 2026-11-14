@@ -45,4 +45,25 @@ describe('session observations', () => {
     observations.clear()
     expect(observations.canContinue('a')).toBe(false)
   })
+
+  it('waits for state to cover the failed turn before allowing continuation', () => {
+    const observations = new SessionObservations()
+    observations.setState('a', { ...idle, cursor: 8 })
+    observations.change('a', 12, [{ key: 'conversationContinuation', val: 12 }])
+    expect(observations.canContinue('a')).toBe(false)
+    observations.setState('a', { ...idle, queue: [{ id: 'next', placement: 'queued', content: [] }] })
+    expect(observations.canContinue('a')).toBe(false)
+    observations.setState('a', idle)
+    expect(observations.canContinue('a')).toBe(true)
+  })
+
+  it('preserves newer state and accepts runtime changes at the same durable cursor', () => {
+    const observations = new SessionObservations()
+    observations.setState('a', { ...idle, running: true, pendingInput: ['question'] })
+    expect(observations.setState('a', { ...idle, cursor: 8 })).toBe(false)
+    expect(observations.state('a')?.running).toBe(true)
+    expect(observations.state('a')?.pendingInput).toEqual(['question'])
+    expect(observations.setState('a', idle)).toBe(true)
+    expect(observations.state('a')).toEqual(idle)
+  })
 })
