@@ -361,9 +361,18 @@ try {
 
   const retrySession = (await rpc('session.create', { cwd: temp })).sessionId
   await rpc('session.selectModel', { sessionId: retrySession, provider: 'connection-check', model: 'connection-check' })
-  await rpc('session.prompt', {
-    sessionId: retrySession, mode: 'queue', content: [{ type: 'text', text: 'Say hello.' }],
-  })
+  await Promise.all([
+    rpc('session.history', { sessionId: retrySession }),
+    rpc('session.history', { sessionId: retrySession }),
+    rpc('session.prompt', {
+      sessionId: retrySession, mode: 'queue', content: [{ type: 'text', text: 'Say hello.' }],
+    }),
+  ])
+  const originalCursor = (await rpc('session.state', { sessionId })).cursor
+  await rpc('session.setPermission', { sessionId, preset: 'read-only' })
+  await rpc.event('session/projection', sessionId, projection => projection.seq > originalCursor
+    && projection.changes.some(change => change.key === 'permissions' && change.val.currentValue === 'read-only'))
+  await rpc.event('session/state', sessionId, state => state.cursor > originalCursor)
   const failed = await rpc.event('session/projection', retrySession, projection => projection.changes.some(change => (
     change.key === 'conversationContinuation' && typeof change.val === 'number'
   )))

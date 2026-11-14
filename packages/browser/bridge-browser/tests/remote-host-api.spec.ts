@@ -503,6 +503,7 @@ describe('dsh 0.2 Remote Host adapter', () => {
     let releaseStale!: () => void
     let releaseFresh!: () => void
     let staleClosed = false
+    let opened = 0
     const staleGate = new Promise<void>((resolve) => { releaseStale = resolve })
     const freshGate = new Promise<void>((resolve) => { releaseFresh = resolve })
     const { api } = harness({
@@ -516,10 +517,9 @@ describe('dsh 0.2 Remote Host adapter', () => {
           }
         }
         if (endpoint !== 'session/follow') throw new Error(endpoint)
-        const sessionId = (payload as {
-          args: { request: { address: { sessionId: string } } }
-        }).args.request.address.sessionId
-        const stale = sessionId === 'session-old'
+        expect((payload as { args: { request: { address: { sessionId: string } } } })
+          .args.request.address.sessionId).toBe('session-new')
+        const stale = ++opened === 1
         return {
           async *[Symbol.asyncIterator]() {
             try {
@@ -543,7 +543,7 @@ describe('dsh 0.2 Remote Host adapter', () => {
     const events = api.events(abort.signal)[Symbol.asyncIterator]()
     const nextEvent = events.next()
 
-    await expect(api.call(call('session.history', { sessionId: 'session-old' })))
+    await expect(api.call(call('session.history', { sessionId: 'session-new' })))
       .resolves.toMatchObject({ ok: true })
     await expect(api.call(call('session.history', { sessionId: 'session-new' })))
       .resolves.toMatchObject({ ok: true })

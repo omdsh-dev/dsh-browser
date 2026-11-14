@@ -9,6 +9,7 @@
  * @module @yuxianglin/dsh-bridge-browser/src/remote-host-api
  */
 
+import { addAbortListener } from 'node:events'
 import type {
   BrowserHostApi,
   HostEventFrame,
@@ -113,6 +114,12 @@ interface SessionSnapshot {
 interface PendingQuestion {
   readonly sessionId: string
   settled: boolean
+}
+
+interface SessionFollower {
+  readonly controller: AbortController
+  readonly maxMessages: number | undefined
+  opening?: Promise<SessionSnapshot>
 }
 
 /** Build the dsh 0.2 Host implementation. */
@@ -508,7 +515,7 @@ type RemoteEventOutcome =
     }
   }
 
-/** One authenticated extension connection's event streams and active Session follower. */
+/** 一条扩展连接中的交互事件及各个会话的独立订阅。 */
 class EventGeneration {
   private readonly lifetime = new AbortController()
   private readonly signal: AbortSignal
@@ -516,10 +523,7 @@ class EventGeneration {
   private readonly tasks = new Set<Promise<void>>()
   private readonly pendingQuestions = new Map<string, PendingQuestion>()
   private clientId: string | undefined
-  private followAbort: AbortController | undefined
-  private followOpening: Promise<SessionSnapshot> | undefined
-  private followedSessionId: string | undefined
-  private followRevision = 0
+  private readonly followers = new Map<string, SessionFollower>()
   private disposed = false
 
   constructor(
@@ -545,21 +549,40 @@ class EventGeneration {
     callSignal: AbortSignal,
     maxMessages?: number,
   ): Promise<SessionSnapshot> {
-    const pending = this.openSessionFollow(sessionId, callSignal, maxMessages)
-    this.followOpening = pending
-    try {
-      return await pending
-    } finally {
-      if (this.followOpening === pending) this.followOpening = undefined
+    callSignal.throwIfAborted()
+    const current = this.followers.get(sessionId)
+    if (current?.opening !== undefined) {
+      const snapshot = await withSignal(current.opening, callSignal)
+      if (current.maxMessages === maxMessages) return snapshot
+      return this.openSessionHistory(sessionId, callSignal, maxMessages)
     }
+    const follower: SessionFollower = { controller: new AbortController(), maxMessages }
+    current?.controller.abort(new Error('browser bridge Session follower replaced'))
+    this.followers.set(sessionId, follower)
+    const pending = this.openSessionFollow(sessionId, follower)
+    follower.opening = pending
+    const opened = (): void => {
+      if (follower.opening === pending) delete follower.opening
+    }
+    void pending.then(opened, opened)
+    return withSignal(pending, callSignal)
   }
 
   async ensureSessionFollow(sessionId: string, callSignal: AbortSignal): Promise<void> {
-    if (this.followedSessionId === sessionId && this.followAbort?.signal.aborted === false) {
-      await this.followOpening
-      return
+    for (;;) {
+      callSignal.throwIfAborted()
+      this.signal.throwIfAborted()
+      const follower = this.followers.get(sessionId)
+      if (follower === undefined) {
+        await this.openSessionHistory(sessionId, callSignal)
+        continue
+      }
+      if (follower.opening !== undefined) await withSignal(follower.opening, callSignal)
+      if (this.followers.get(sessionId) === follower) {
+        follower.controller.signal.throwIfAborted()
+        return
+      }
     }
-    await this.openSessionHistory(sessionId, callSignal)
   }
 
   async respond(rpcId: string, result: RespondResult, signal: AbortSignal): Promise<unknown> {
@@ -581,7 +604,6 @@ class EventGeneration {
   async dispose(): Promise<void> {
     if (this.disposed) return
     this.disposed = true
-    this.followAbort?.abort(new Error('browser bridge event generation closed'))
     this.lifetime.abort(new Error('browser bridge event generation closed'))
     this.queue.end()
     await Promise.all(this.tasks)
@@ -589,15 +611,10 @@ class EventGeneration {
 
   private async openSessionFollow(
     sessionId: string,
-    callSignal: AbortSignal,
-    maxMessages?: number,
+    follower: SessionFollower,
   ): Promise<SessionSnapshot> {
-    const revision = ++this.followRevision
-    this.followAbort?.abort(new Error('browser bridge Session follower replaced'))
-    const controller = new AbortController()
-    this.followAbort = controller
-    this.followedSessionId = sessionId
-    const signal = AbortSignal.any([this.signal, callSignal, controller.signal])
+    const { controller, maxMessages } = follower
+    const signal = AbortSignal.any([this.signal, controller.signal])
     const iterators: AsyncIterator<unknown>[] = []
     try {
       // 先建立投影订阅，再读取基线，保证打开期间的变化不会丢失。
@@ -631,18 +648,22 @@ class EventGeneration {
       if (first.done || !isSessionSnapshot(first.value)) {
         throw new TypeError('session/follow did not begin with a snapshot')
       }
-      if (revision !== this.followRevision || signal.aborted) {
-        signal.throwIfAborted()
-        throw new Error('browser bridge Session follower was replaced while opening')
-      }
+      signal.throwIfAborted()
       const states = await openWireStream(this.gateway, this.peer, 'session/observeState', {
         args: { request: { sessionId } },
       }, signal)
       const stateIterator = states[Symbol.asyncIterator]()
       iterators.push(stateIterator)
       signal.throwIfAborted()
-      if (revision !== this.followRevision) throw new Error('browser bridge Session follower was replaced while opening')
       const snapshotId = first.value.assistantStream === undefined ? undefined : crypto.randomUUID()
+      const snapshot: SessionSnapshot = {
+        cursor: first.value.cursor,
+        records: first.value.records,
+        hasMore: first.value.hasMore,
+        ...(first.value.projections === undefined ? {} : { projections: first.value.projections }),
+        ...(first.value.assistantStream === undefined ? {} : { assistantStream: first.value.assistantStream }),
+        ...(snapshotId === undefined ? {} : { snapshotId }),
+      }
       // Publish the reconnect prefix before any suffix chunks. RPC responses
       // and pushed events can otherwise race, dropping the beginning of an
       // already-running attempt when the panel reopens its history.
@@ -653,37 +674,28 @@ class EventGeneration {
           payload: {
             sessionId,
             snapshotId,
+            history: historyValue(snapshot),
             frame: { type: 'snapshot', baseline: first.value.assistantStream },
           },
         })
       }
       const projectionSeq = isRecord(first.value.projections) && typeof first.value.projections.asOfSeq === 'number'
         ? first.value.projections.asOfSeq : first.value.cursor
-      this.track(this.pumpSessionObserver(sessionId, revision, projectionIterator, signal, 'projection', projectionSeq))
-      this.track(this.pumpSessionObserver(sessionId, revision, stateIterator, signal, 'state'))
-      this.track(this.pumpSessionEvents(sessionId, revision, iterator, signal))
-      return {
-        cursor: first.value.cursor,
-        records: first.value.records,
-        hasMore: first.value.hasMore,
-        ...(first.value.projections === undefined ? {} : { projections: first.value.projections }),
-        ...(first.value.assistantStream === undefined ? {} : { assistantStream: first.value.assistantStream }),
-        ...(snapshotId === undefined ? {} : { snapshotId }),
-      }
+      this.track(this.pumpSessionObserver(sessionId, follower, projectionIterator, signal, 'projection', projectionSeq))
+      this.track(this.pumpSessionObserver(sessionId, follower, stateIterator, signal, 'state'))
+      this.track(this.pumpSessionEvents(sessionId, follower, iterator, signal))
+      return snapshot
     } catch (error: unknown) {
       controller.abort(error)
       await Promise.all(iterators.map(iterator => iterator.return?.()))
-      if (revision === this.followRevision) {
-        this.followedSessionId = undefined
-        this.followAbort = undefined
-      }
+      if (this.followers.get(sessionId) === follower) this.followers.delete(sessionId)
       throw error
     }
   }
 
   private async pumpSessionEvents(
     sessionId: string,
-    revision: number,
+    follower: SessionFollower,
     iterator: AsyncIterator<unknown>,
     signal: AbortSignal,
   ): Promise<void> {
@@ -693,7 +705,7 @@ class EventGeneration {
         // Abort is advisory to an AsyncIterator: a buffered frame may still
         // resolve after this follower was replaced. Never let that stale
         // generation update the extension's active/recent session state.
-        if (signal.aborted || revision !== this.followRevision) break
+        if (signal.aborted || this.followers.get(sessionId) !== follower) break
         if (next.done) break
         if (isRecord(next.value) && next.value.type === 'assistant-stream' && isRecord(next.value.frame)) {
           this.queue.push({
@@ -712,24 +724,23 @@ class EventGeneration {
           payload: { type: 'session/event', sessionId, event: next.value.event },
         })
       }
-      if (!signal.aborted && revision === this.followRevision) {
+      if (!signal.aborted && this.followers.get(sessionId) === follower) {
         throw new Error('session/follow ended unexpectedly')
       }
     } catch (error: unknown) {
-      if (!signal.aborted && revision === this.followRevision) this.queue.fail(error)
+      if (!signal.aborted && this.followers.get(sessionId) === follower) this.queue.fail(error)
     } finally {
       await iterator.return?.()
-      if (revision === this.followRevision) {
-        this.followAbort?.abort(new Error('browser bridge Session follower ended'))
-        this.followedSessionId = undefined
-        this.followAbort = undefined
+      if (this.followers.get(sessionId) === follower) {
+        follower.controller.abort(new Error('browser bridge Session follower ended'))
+        this.followers.delete(sessionId)
       }
     }
   }
 
   private async pumpSessionObserver(
     sessionId: string,
-    revision: number,
+    follower: SessionFollower,
     iterator: AsyncIterator<unknown>,
     signal: AbortSignal,
     kind: 'projection' | 'state',
@@ -738,7 +749,7 @@ class EventGeneration {
     try {
       while (!signal.aborted) {
         const next = await iterator.next()
-        if (signal.aborted || revision !== this.followRevision) return
+        if (signal.aborted || this.followers.get(sessionId) !== follower) return
         if (next.done) throw new Error(`session ${kind} observation ended unexpectedly`)
         const value = next.value
         if (kind === 'projection') {
@@ -760,7 +771,7 @@ class EventGeneration {
         }
       }
     } catch (error: unknown) {
-      if (!signal.aborted && revision === this.followRevision) throw error
+      if (!signal.aborted && this.followers.get(sessionId) === follower) throw error
     } finally {
       await iterator.return?.()
     }
@@ -847,6 +858,15 @@ class EventGeneration {
     this.tasks.add(tracked)
     void tracked.finally(() => { this.tasks.delete(tracked) })
   }
+}
+
+/** 单个调用的取消只结束自己的等待，共享订阅由连接和会话管理。 */
+async function withSignal<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+  signal.throwIfAborted()
+  let rejectAbort!: (reason: unknown) => void
+  const aborted = new Promise<never>((_resolve, reject) => { rejectAbort = reject })
+  using _listener = addAbortListener(signal, () => { rejectAbort(signal.reason) })
+  return await Promise.race([pending, aborted])
 }
 
 class AsyncEventQueue {

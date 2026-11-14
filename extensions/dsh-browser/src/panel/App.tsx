@@ -1062,8 +1062,8 @@ export function App(): React.JSX.Element {
         setSessionEpoch((epoch) => epoch + 1)
       }
       if (previous !== null && next !== previous && next === 'connected' && sessionRef.current !== null) {
-        // A reconnect can outlive a directory read; reload instead of trusting
-        // whatever the previous bridge generation answered.
+        // 重连后重新建立当前会话的订阅和历史基线。
+        void refreshHistory(sessionRef.current)
         void refreshComposerDirectories(sessionRef.current)
       }
     })
@@ -1206,7 +1206,9 @@ export function App(): React.JSX.Element {
       return
     }
     if (frame.frame.method === 'session/assistant-stream') {
-      const payload = frame.frame.payload as { sessionId?: unknown; snapshotId?: unknown; frame?: unknown } | undefined
+      const payload = frame.frame.payload as {
+        sessionId?: unknown; snapshotId?: unknown; frame?: unknown; history?: HistoryPage
+      } | undefined
       if (typeof payload?.sessionId !== 'string' || typeof payload.frame !== 'object' || payload.frame === null) return
       const sessionId = payload.sessionId
       const stream = assistantStreamsRef.current.get(sessionId) ?? new AssistantStreamView()
@@ -1223,7 +1225,8 @@ export function App(): React.JSX.Element {
         // beat it through the RPC channel. Other pending cuts may belong to a
         // newer follower whose baseline is still queued behind this one.
         pendingHistoriesRef.current.delete(payload.snapshotId)
-        if (pending !== undefined) applyHistory(sessionId, pending.history)
+        const history = payload.history ?? pending?.history
+        if (history !== undefined) applyHistory(sessionId, history)
       }
       setStreamRow(stream.row())
       if (update === 'rebaseline') await rebaselineStream(sessionId)
@@ -1381,6 +1384,8 @@ export function App(): React.JSX.Element {
   function applyHistory(id: string, history: HistoryPage): void {
     if (sessionRef.current !== id) return
     const followed = followSnapshotsRef.current.get(id)
+    // 同一基线可能先通过事件到达，再由 RPC 返回；只发布一次以保留实时追加内容。
+    if (history.snapshotId !== undefined && followed?.id === history.snapshotId && followed.applied) return
     // A newer history request may have replaced this follower while the RPC
     // response was travelling. Its older cut cannot replace the current view.
     if (history.snapshotId !== undefined && followed !== undefined && followed.id !== history.snapshotId) {
