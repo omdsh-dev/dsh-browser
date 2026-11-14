@@ -373,6 +373,13 @@ class RemoteHostApi implements BrowserHostApi {
     const sessionId = sessionIdOf(call.payload)
     if (sessionId === undefined) return badRequest('commands.list requires a non-empty sessionId')
     try {
+      if (isRecord(call.payload) && call.payload.passive === true) {
+        const state = await this.invoke({
+          namespace: 'session', method: 'state', args: { request: { sessionId } }, signal: call.signal,
+        })
+        if (!isRecord(state) || typeof state.active !== 'boolean') throw new TypeError('session/state returned an invalid state')
+        if (!state.active) return { ok: true, value: { commands: [], provisional: true } }
+      }
       const value = await this.invoke({
         namespace: 'commands', method: 'list', args: { agentId: sessionId }, signal: call.signal,
       })
@@ -634,7 +641,7 @@ class EventGeneration {
           args: {
             request: {
               address: { kind: 'session', sessionId },
-              activate: true,
+              activate: false,
               assistantStream: true,
               ...(maxMessages === undefined ? {} : { maxMessages }),
             },
@@ -921,6 +928,7 @@ function invokeTarget(call: HostRpcCall): InvokeTarget | { readonly error: HostR
     case 'session.state':
     case 'session.cancel':
     case 'workspace.create':
+    case 'workspace.unarchiveSession':
     case 'workspace.archiveSession': {
       const [namespace, method] = call.method.split('.') as [string, string]
       return { namespace, method, args: { request: call.payload } }

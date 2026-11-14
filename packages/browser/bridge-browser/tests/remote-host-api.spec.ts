@@ -324,7 +324,7 @@ describe('dsh 0.2 Remote Host adapter', () => {
         request: {
           address: { kind: 'session', sessionId: 'session-1' },
           maxMessages: 2,
-          activate: true,
+          activate: false,
           assistantStream: true,
         },
       },

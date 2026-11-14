@@ -206,6 +206,14 @@ function mountBridge(
         return persistence.open(id as Parameters<typeof persistence.open>[0], 'write')
       },
       archiveSession: async (id) => {
+        const workspace = await api.call({
+          rpcId: randomUUID(), method: 'workspace.list', payload: {}, signal: new AbortController().signal,
+        })
+        if (!workspace.ok) throw new Error(workspace.error.message)
+        if (!isRecord(workspace.value) || !Array.isArray(workspace.value.archivedSessionIds)) {
+          throw new TypeError('workspace.list returned an invalid archive set')
+        }
+        const wasArchived = workspace.value.archivedSessionIds.includes(id)
         const archived = await api.call({
           rpcId: randomUUID(),
           method: 'workspace.archiveSession',
@@ -213,6 +221,14 @@ function mountBridge(
           signal: new AbortController().signal,
         })
         if (!archived.ok) throw new Error(archived.error.message)
+        if (wasArchived) return
+        return async () => {
+          const restored = await api.call({
+            rpcId: randomUUID(), method: 'workspace.unarchiveSession', payload: { sessionId: id },
+            signal: new AbortController().signal,
+          })
+          if (!restored.ok) throw new Error(restored.error.message)
+        }
       },
       waitForArchiveCleanup: async (id) => {
         const worktrees = ctx.get('worktrees')

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { once } from 'node:events'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -28,7 +28,11 @@ const marker = join(temp, 'observation.json')
 const patch = join(temp, 'smoke.patch.yml')
 const sessionId = `session-${randomUUID()}`
 const legacySessionId = `session-${randomUUID()}`
-const worktreeSessions = [false, true].map(dirty => ({ sessionId: `session-${randomUUID()}`, dirty }))
+const worktreeSessions = [
+  { dirty: false, failCleanup: false },
+  { dirty: true, failCleanup: false },
+  { dirty: false, failCleanup: true },
+].map(entry => ({ sessionId: `session-${randomUUID()}`, ...entry }))
 const worktreeRepository = join(temp, 'worktree-repository')
 const legacyProject = temp.replace(/[\\/:]+/g, '-').replace(/[^A-Za-z0-9._-]/g,
   char => `~${char.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}`).replace(/^-+/, '')
@@ -181,10 +185,13 @@ async function start(reopen) {
   }
   socket.send(JSON.stringify({ t: 'hello', token, caps: { textOnly: true, snapshotMaxChars: 32_000, maxInteractiveItems: 60 } }))
   await frame(value => value.t === 'hello.ok')
-  async function send(method, payload) {
+  async function request(method, payload) {
     const id = randomUUID()
     socket.send(JSON.stringify({ t: 'rpc', id, method, payload }))
-    const result = await frame(value => value.t === 'rpc.result' && value.id === id)
+    return frame(value => value.t === 'rpc.result' && value.id === id)
+  }
+  async function send(method, payload) {
+    const result = await request(method, payload)
     assert.equal(result.ok, true, JSON.stringify(result))
     if (method === BRIDGE_INJECT_BROWSER_SNAPSHOT_METHOD) {
       assert.deepEqual(result.result, { accepted: true })
@@ -203,6 +210,7 @@ async function start(reopen) {
   }
   // Business failures are part of the contract, so the smoke also reads raw envelopes.
   rpc.raw = (method, payload) => send(method, payload)
+  rpc.request = request
   rpc.event = (method, sessionId, accept = () => true) => frame(value => value.t === 'event'
     && value.frame.method === method && value.frame.payload.sessionId === sessionId && accept(value.frame.payload))
   return rpc
@@ -278,6 +286,30 @@ try {
   assert.equal((await observation()).source, 'prepared')
   for (const entry of worktreeSessions) {
     const worktree = await observation(`${marker}.${entry.sessionId}`)
+    await rpc('session.history', { sessionId: entry.sessionId })
+    await rpc('session.models', { sessionId: entry.sessionId })
+    await rpc('session.permissions', { sessionId: entry.sessionId })
+    await rpc('commands.list', { sessionId: entry.sessionId, passive: true })
+    await rpc('skills.list', { sessionId: entry.sessionId })
+    assert.equal((await rpc('session.state', { sessionId: entry.sessionId })).active, false,
+      'browsing history and composer directories must leave the Agent inactive')
+    if (entry.failCleanup) {
+      // 暂时撤销隔离仓库配置的读取权限，验证真实 Git 失败后的归档恢复和重试。
+      const gitConfig = join(worktreeRepository, '.git/config')
+      const configMode = (await stat(gitConfig)).mode
+      await chmod(gitConfig, 0)
+      try {
+        const failed = await rpc.request(BRIDGE_SESSION_PURGE_METHOD, { sessionId: entry.sessionId })
+        assert.equal(failed.ok, false, JSON.stringify(failed))
+        assert.match(failed.error.message, /worktree cleanup failed/)
+        assert.equal((await rpc('workspace.list', {})).archivedSessionIds.includes(entry.sessionId), false)
+        assert.ok((await rpc('session.list', {})).items.some(item => item.sessionId === entry.sessionId))
+        assert.ok((await rpc('session.history', { sessionId: entry.sessionId })).events.length > 0)
+      } finally {
+        await chmod(gitConfig, configMode)
+      }
+      await rm(`${marker}.cleanup-${entry.sessionId}`)
+    }
     await rpc(BRIDGE_SESSION_PURGE_METHOD, { sessionId: entry.sessionId })
     const cleanup = await observation(`${marker}.cleanup-${entry.sessionId}`)
     assert.equal(cleanup.cleanup.status, entry.dirty ? 'retained' : 'removed')
@@ -291,7 +323,7 @@ try {
   assert.deepEqual((await rpc('session.models', { sessionId })).current, selectedModel)
   assert.ok((await rpc('session.list', {})).items.some(item => item.sessionId === sessionId))
   const reopened = (await rpc('session.history', { sessionId })).events
-  await rpc.event('session/state', sessionId, state => state.active)
+  await rpc.event('session/state', sessionId, state => !state.active)
   const restoredImage = await rpc('session.attachment', { sessionId, attachment: initial.attachment })
   assert.equal(restoredImage.data, image.data)
   assert.deepEqual(reopened.slice(0, history.events.length), history.events)
@@ -309,8 +341,7 @@ try {
   assert.equal(splice.data.outcome, 'canceled')
   assert.equal(splice.data.removedCount, 1)
   const reopenedLegacy = await rpc('session.history', { sessionId: legacySessionId })
-  // Following a cold Session activates it after the opening snapshot and may
-  // append seed/permission metadata. The migrated history prefix stays exact.
+  // 历史订阅保持被动读取，迁移后的历史前缀保持一致。
   assert.deepEqual(reopenedLegacy.events.slice(0, migrated.events.length), migrated.events)
   assert.deepEqual(await readFile(legacyFile), legacyBytes)
   // Composer controls: the panel reaches the Host permission preset table and
@@ -388,7 +419,7 @@ try {
   assert.equal(endings.length, 2)
   assert.ok(endings.every(({ event }) => event.data.reason.kind === 'error' && event.data.reason.error.code === 'TRANSPORT'))
 
-  console.log('Real DSH smoke passed: discovery, authentication, image storage and reads, passive pagination, cold activation, live state and projections, model and permission selection, Host commands and skills, V2 migration, browser context, continuation after a real transport failure, and session deletion with clean and dirty worktrees')
+  console.log('Real DSH smoke passed: discovery, authentication, image storage and reads, passive history, concurrent history and prompt admission, independent session observations, model and permission selection, Host commands and skills, V2 migration, browser context, continuation after a real transport failure, and session deletion including worktree cleanup failure and retry')
   succeeded = true
 } catch (error) {
   console.error(hostLog)

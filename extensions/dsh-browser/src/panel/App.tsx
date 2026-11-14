@@ -1636,7 +1636,7 @@ export function App(): React.JSX.Element {
    * A provisional Session answers empty with `provisional: true`; the panel
    * then keeps the last real directory and says when it becomes authoritative.
    */
-  async function refreshComposerCatalogs(sessionId: string | null = sessionRef.current): Promise<void> {
+  async function refreshComposerCatalogs(sessionId: string | null = sessionRef.current, passive = true): Promise<void> {
     if (sessionId === null) {
       setCommandDirectory(null)
       setSkillDirectory(null)
@@ -1644,7 +1644,7 @@ export function App(): React.JSX.Element {
       return
     }
     const [commands, skills] = await Promise.all([
-      api.rpc<unknown>('commands.list', { sessionId }).catch((cause: unknown) => cause),
+      api.rpc<unknown>('commands.list', { sessionId, passive }).catch((cause: unknown) => cause),
       api.rpc<unknown>('skills.list', { sessionId }).catch((cause: unknown) => cause),
     ])
     if (sessionRef.current !== sessionId) return
@@ -3128,7 +3128,9 @@ export function App(): React.JSX.Element {
               if (!sendingRef.current) setDraft((current) => ({ ...current, text: e.target.value }))
               const caret = e.target.selectionStart ?? e.target.value.length
               caretRef.current = caret
-              setShowSlashMenu(slashQuery(e.target.value, caret) !== null)
+              const openingMenu = slashQuery(e.target.value, caret) !== null
+              if (openingMenu && !showSlashMenu) void refreshComposerCatalogs(sessionRef.current, false)
+              setShowSlashMenu(openingMenu)
               setSlashIndex(0)
             }}
             onKeyDown={(e) => {
