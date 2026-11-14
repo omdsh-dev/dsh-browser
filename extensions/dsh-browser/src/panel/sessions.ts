@@ -101,13 +101,14 @@ export class SessionRuntimeCache {
     this.sessions.set(sessionId, { ...current, running })
   }
 
-  startTurn(sessionId: string): void {
+  setRunning(sessionId: string, running: boolean): void {
     const current = this.sessions.get(sessionId) ?? { questions: [] }
-    this.sessions.set(sessionId, { ...current, running: true })
+    this.sessions.set(sessionId, { ...current, running })
   }
 
-  finishTurn(sessionId: string): void {
-    this.sessions.set(sessionId, { running: false, questions: [] })
+  clearQuestions(sessionId: string): void {
+    const current = this.sessions.get(sessionId) ?? { questions: [] }
+    this.sessions.set(sessionId, { ...current, questions: [] })
   }
 
   snapshot(sessionId: string, fallbackRunning = false): SessionRuntimeSnapshot {

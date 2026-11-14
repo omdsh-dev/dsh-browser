@@ -47,8 +47,10 @@ export interface SessionPurgeDeps {
    * not provide exclusion: idle Agents and other processes can own the log.
    */
   acquireOwnership(sessionId: string): Promise<{ close(): Promise<void> }>
-  /** Archive while the durable session still exists and exclusive ownership is held. */
-  archiveSession(sessionId: string): Promise<void>
+  /** 归档后返回恢复原有归档状态的操作，供清理失败时使用。 */
+  archiveSession(sessionId: string): Promise<void | (() => Promise<void>)>
+  /** 等待宿主完成归档触发的 worktree 清理，再移除会话日志。 */
+  waitForArchiveCleanup?(sessionId: string): Promise<void>
 }
 
 /**
@@ -122,11 +124,15 @@ export async function purgeSessionFiles(deps: SessionPurgeDeps, sessionId: strin
   }
   let failure: unknown
   let archived = false
+  let restoreArchive: void | (() => Promise<void>) = undefined
+  let removing = false
   try {
     // The public archive API checks existence. Calling it after deletion
     // succeeds only accidentally when its header cache already knows this id.
-    await deps.archiveSession(sessionId)
+    restoreArchive = await deps.archiveSession(sessionId)
     archived = true
+    await deps.waitForArchiveCleanup?.(sessionId)
+    removing = true
     for (const target of targets) {
       if (!(await lstat(target)).isDirectory()) throw new Error(`session directory changed: ${target}`)
       // Re-scan after write-open: opening an old log may materialize V3.
@@ -136,9 +142,18 @@ export async function purgeSessionFiles(deps: SessionPurgeDeps, sessionId: strin
       }
     }
   } catch (error: unknown) {
+    let cause = error
+    if (!removing && restoreArchive !== undefined) {
+      try {
+        await restoreArchive()
+        archived = false
+      } catch (restoreError: unknown) {
+        cause = new AggregateError([error, restoreError], 'worktree cleanup and archive restoration failed')
+      }
+    }
     failure = new SessionPurgeError('internal', archived
-      ? `session was archived, but durable cleanup failed: ${String(error)}`
-      : `could not archive session; durable data was preserved: ${String(error)}`, { cause: error })
+      ? `session was archived, but durable cleanup failed: ${String(cause)}`
+      : `session cleanup failed: ${String(cause)}`, { cause })
   } finally {
     try {
       await ownership.close()

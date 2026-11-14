@@ -201,6 +201,12 @@ export function withSessionDeferral(
       if (sessionId === undefined) return api.call(call)
       const entry = provisional.get(sessionId)
       if (entry === undefined) return api.call(call)
+      if (isRecord(call.payload) && Array.isArray(call.payload.content) && call.payload.content.length === 0) {
+        return {
+          ok: false,
+          error: { code: 'provisional-session', message: 'this session has no generation to continue', details: {} },
+        }
+      }
       const existing = materializing.get(sessionId)
       const pending = existing ?? materialize(sessionId, entry, call.signal)
       if (existing === undefined) {

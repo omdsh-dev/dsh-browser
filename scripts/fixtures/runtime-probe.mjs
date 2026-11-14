@@ -1,13 +1,19 @@
 // Loaded only by smoke-runtime.mjs into its isolated real DSH profile.
 import assert from 'node:assert/strict'
+import { writeFileSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 
 export const name = 'runtime-smoke-probe'
-export const inject = ['sessions', 'sessionPersistence', 'sessionQuery', 'sessionProjectionCache']
+export const inject = ['sessions', 'sessionPersistence', 'sessionQuery', 'sessionProjectionCache', 'attachments', 'worktrees']
 
 export async function apply(ctx, config) {
+  ctx.on('worktree/cleanup', info => {
+    if (info.cleanup.status !== 'scheduled') {
+      writeFileSync(`${config.marker}.cleanup-${info.sessionId}`, JSON.stringify(info))
+    }
+  })
   // DSH 0.1.7 resolves profile packages through process-local module hooks.
   // Inspect providers inside the host where those hooks are installed.
   const resolve = createRequire(config.profileManifest)
@@ -36,7 +42,16 @@ export async function apply(ctx, config) {
     }
     return
   }
-  ctx.on('session/created', async (session) => {
+  ctx.on('agent/created', async ({ agent }) => {
+    const session = agent.session
+    const worktreeSession = config.worktreeSessions.find(entry => entry.sessionId === session.id)
+    if (worktreeSession !== undefined) {
+      const worktree = await ctx.worktrees.create(agent)
+      if (worktreeSession.dirty) await writeFile(`${worktree.path}/user-note.txt`, 'Keep this file.\n')
+      await ctx.sessionPersistence.flush()
+      await writeFile(`${config.marker}.${session.id}`, JSON.stringify(worktree))
+      return
+    }
     if (session.id !== config.sessionId) return
     // A durable Session choice must survive catalog refreshes and cold reads,
     // independently of the deployment default. No model request is needed.
@@ -46,6 +61,9 @@ export async function apply(ctx, config) {
     // AgentLoop owns writes through its SessionHandle; the service flush
     // barrier drains those handles and materializes even an empty session.
     await ctx.sessionPersistence.flush()
-    await writeFile(config.marker, JSON.stringify({ sessionId: session.id }))
+    const attachment = await ctx.attachments.saveImage({
+      data: await readFile(config.imagePath), mediaType: 'image/png', name: 'browser-icon.png',
+    })
+    await writeFile(config.marker, JSON.stringify({ sessionId: session.id, attachment }))
   })
 }

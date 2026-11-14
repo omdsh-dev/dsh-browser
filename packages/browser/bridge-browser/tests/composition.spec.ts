@@ -25,6 +25,7 @@ import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRegistry from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import LlmService, { createUserMessage, type GenerateOptions, type UserMessage } from '@deepseek-ai/dsh-llm'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
@@ -149,6 +150,7 @@ async function loadComposition(): Promise<{ ctx: Context; configPath: string; po
     "- name: '@deepseek-ai/dsh-agent'",
     "- name: '@deepseek-ai/dsh-system-prompt'",
     "- name: '@deepseek-ai/dsh-tools'",
+    "- name: '@deepseek-ai/dsh-tool-executor-native'",
     "- name: '@deepseek-ai/dsh-llm'",
     "- name: '@deepseek-ai/dsh-agent-loop'",
     `- name: '${apiHostName}'`,
@@ -176,6 +178,7 @@ async function loadComposition(): Promise<{ ctx: Context; configPath: string; po
     ['@deepseek-ai/dsh-agent', AgentRegistry],
     ['@deepseek-ai/dsh-system-prompt', SystemPrompt],
     ['@deepseek-ai/dsh-tools', ToolRegistry],
+    ['@deepseek-ai/dsh-tool-executor-native', NativeToolExecutor],
     ['@deepseek-ai/dsh-llm', LlmService],
     ['@deepseek-ai/dsh-agent-loop', AgentLoop],
     [apiHostName, RemoteApiHost],

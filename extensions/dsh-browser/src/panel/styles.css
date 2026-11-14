@@ -3493,3 +3493,13 @@ textarea:focus-visible {
   background: var(--canvas);
   color: var(--ink-strong);
 }
+.continue-generation {
+  align-self: flex-start;
+  margin: 8px 0 12px 40px;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}

@@ -220,6 +220,7 @@ export interface PanelCopy {
     selectModel: string
     noModelsConfigured: string
     stopTurn: string
+    continueGeneration: string
     stoppingTurn: string
     addImages: string
     imageUnavailable: string
@@ -529,6 +530,7 @@ const EN: PanelCopy = {
     selectModel: 'Model',
     noModelsConfigured: 'No models yet — Host has no routable models.',
     stopTurn: 'Stop generating',
+    continueGeneration: 'Continue generating',
     stoppingTurn: 'Stopping…',
     addImages: 'Add images',
     imageUnavailable: 'This dsh host does not advertise image input',
@@ -840,6 +842,7 @@ const ZH: PanelCopy = {
     selectModel: '模型',
     noModelsConfigured: '暂无模型 — Host 尚未提供可用模型。',
     stopTurn: '停止生成',
+    continueGeneration: '继续生成',
     stoppingTurn: '正在停止…',
     addImages: '添加图片',
     imageUnavailable: '当前 dsh 宿主未声明图片输入能力',

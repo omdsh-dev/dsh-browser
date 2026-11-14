@@ -32,7 +32,7 @@ The package declares `dsh.bundle.patch` as `./cordis.patch.yml`. The installer r
 
 The bridge and extension share one pnpm workspace. Bridge source imports `@deepseek-ai/cordis` and `@deepseek-ai/schemastery` directly, and its DSH dependencies match the workspace's pinned release. The root build builds the bridge before the extension.
 
-The package manifest declares that support itself: `engines.dsh` (`^0.2.1-rc.5`) and `dsh.manifestVersion: 1` let dsh refuse an incompatible host before loading the plugin, and the Plugins page reads the localized title and description from `locale/en.json` / `locale/zh.json` plus the icon from `icon.svg` without activating the plugin.
+The package manifest declares that support itself: `engines.dsh` (`^0.2.2-rc.2`) and `dsh.manifestVersion: 1` let dsh refuse an incompatible host before loading the plugin, and the Plugins page reads the localized title and description from `locale/en.json` / `locale/zh.json` plus the icon from `icon.svg` without activating the plugin.
 
 ## Host methods the panel drives
 
@@ -49,6 +49,10 @@ offered to the model as tools.
 | `commands.list` | `{ sessionId }` | `commands/list` scoped to the Session's agent | `{ commands: [{ name, description, hint?, definitionId? }], provisional }` |
 | `commands.execute` | `{ sessionId, line }` | `commands/execute` with the empty attachment list | `{ commandId, result }`; an unknown line is a `bad-request` |
 | `skills.list` | `{ sessionId }` | `skills/list` for the Session composition | `{ skills: [{ name, description, whenToUse?, modelInvocable, path? }], provisional }` |
+
+Opening `session.history` activates the Session through `session/follow`; requests with `beforeSeq` use `session/events` for older pages. `session/observeState` supplies the bridge's `session/state` events, and `session/observeProjections` supplies `session/projection` events with `{ sessionId, seq, changes }`.
+
+`session.attachment` takes `{ sessionId, attachment }` with the complete image reference. When the `conversationContinuation` projection permits it and the Session is idle, the panel continues with `session.prompt` and `content: []`. Session deletion waits for the Host's archive-triggered worktree cleanup before removing its log.
 
 Failure semantics: a Host that does not mount the permission service answers
 `session.permissions` with `routable: false` instead of failing, so the panel

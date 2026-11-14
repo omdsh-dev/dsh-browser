@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { once } from 'node:events'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { randomUUID } from 'node:crypto'
+import { createServer } from 'node:net'
 import { zstdCompressSync } from 'node:zlib'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
@@ -17,7 +19,7 @@ const expectedVersion = JSON.parse(await readFile(join(root, 'package.json'), 'u
 const cli = join(dirname(require.resolve('@deepseek-ai/dsh/package.json')), 'lib/bin.js')
 const bridgeRequire = createRequire(join(bridge, 'package.json'))
 const { default: WebSocket } = await import(pathToFileURL(bridgeRequire.resolve('ws')).href)
-const { BRIDGE_INJECT_BROWSER_SNAPSHOT_METHOD, BEACON_PORTS, BRIDGE_CONFIG_PATH } = await import(
+const { BRIDGE_INJECT_BROWSER_SNAPSHOT_METHOD, BRIDGE_SESSION_PURGE_METHOD, BEACON_PORTS, BRIDGE_CONFIG_PATH } = await import(
   pathToFileURL(join(bridge, 'lib/protocol.js')).href
 )
 const temp = await mkdtemp(join(tmpdir(), 'dsh-runtime-smoke-'))
@@ -26,6 +28,12 @@ const marker = join(temp, 'observation.json')
 const patch = join(temp, 'smoke.patch.yml')
 const sessionId = `session-${randomUUID()}`
 const legacySessionId = `session-${randomUUID()}`
+const worktreeSessions = [
+  { dirty: false, failCleanup: false },
+  { dirty: true, failCleanup: false },
+  { dirty: false, failCleanup: true },
+].map(entry => ({ sessionId: `session-${randomUUID()}`, ...entry }))
+const worktreeRepository = join(temp, 'worktree-repository')
 const legacyProject = temp.replace(/[\\/:]+/g, '-').replace(/[^A-Za-z0-9._-]/g,
   char => `~${char.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}`).replace(/^-+/, '')
 const legacyDirectory = join(home, 'sessions', `--${legacyProject.slice(0, 251)}--`, legacySessionId)
@@ -43,7 +51,13 @@ const legacyLog = [
 // The JSONL container requires its header in a separate Zstandard frame.
 const legacyBytes = Buffer.concat(legacyLog.trimEnd().split('\n').map(line => zstdCompressSync(Buffer.from(line + '\n'))))
 const token = randomUUID()
-const env = { ...process.env, DSH_HOME: home, DSH_TELEMETRY_DISABLED: '1' }
+const env = { ...process.env, DSH_HOME: home, DSH_TELEMETRY_DISABLED: '1', DSH_PERMISSION_MODE: 'danger-full-access' }
+// 使用已关闭的本机端口验证真实连接失败及继续请求，不返回模拟模型响应。
+const unavailableServer = createServer()
+unavailableServer.listen(0, '127.0.0.1')
+await once(unavailableServer, 'listening')
+const unavailablePort = unavailableServer.address().port
+await new Promise(resolve => unavailableServer.close(resolve))
 // Do not inherit bridge settings or credentials from the developer's shell.
 delete env.DSH_EXT_TOKEN
 delete env.DSH_BROWSER_SESSION_WORKSPACE
@@ -87,6 +101,19 @@ async function start(reopen) {
     `    token: ${JSON.stringify(token)}`,
     '    sessionWorkspacePath: ""',
     '    deferSessionCreate: false',
+    '- id: llm-pi-ai',
+    '  config:',
+    '    providers:',
+    '      connection-check:',
+    '        api: openai-completions',
+    `        baseURL: http://127.0.0.1:${unavailablePort}/v1`,
+    '        headers:',
+    '          Authorization: Bearer local-connection-check',
+    '        models:',
+    '          - id: connection-check',
+    '        retryPolicy:',
+    '          mode: normal',
+    '          maxRetries: 0',
     '- insert:',
     '    - id: runtime-smoke-probe',
     `      name: ${JSON.stringify(pathToFileURL(join(root, 'scripts/fixtures/runtime-probe.mjs')).href)}`,
@@ -96,6 +123,8 @@ async function start(reopen) {
     `        reopen: ${reopen}`,
     `        profileManifest: ${JSON.stringify(join(home, 'profiles/web/package.json'))}`,
     `        expectedVersion: ${JSON.stringify(expectedVersion)}`,
+    `        imagePath: ${JSON.stringify(join(root, 'extensions/dsh-browser/assets/icons/icon32.png'))}`,
+    `        worktreeSessions: ${JSON.stringify(worktreeSessions)}`,
     '',
   ].join('\n'))
   hostLog = ''
@@ -156,13 +185,20 @@ async function start(reopen) {
   }
   socket.send(JSON.stringify({ t: 'hello', token, caps: { textOnly: true, snapshotMaxChars: 32_000, maxInteractiveItems: 60 } }))
   await frame(value => value.t === 'hello.ok')
-  async function send(method, payload) {
+  async function request(method, payload) {
     const id = randomUUID()
     socket.send(JSON.stringify({ t: 'rpc', id, method, payload }))
-    const result = await frame(value => value.t === 'rpc.result' && value.id === id)
+    return frame(value => value.t === 'rpc.result' && value.id === id)
+  }
+  async function send(method, payload) {
+    const result = await request(method, payload)
     assert.equal(result.ok, true, JSON.stringify(result))
     if (method === BRIDGE_INJECT_BROWSER_SNAPSHOT_METHOD) {
       assert.deepEqual(result.result, { accepted: true })
+      return { ok: true, value: result.result }
+    }
+    if (method === BRIDGE_SESSION_PURGE_METHOD) {
+      assert.deepEqual(result.result, { purged: true })
       return { ok: true, value: result.result }
     }
     return result.result?.result
@@ -174,12 +210,15 @@ async function start(reopen) {
   }
   // Business failures are part of the contract, so the smoke also reads raw envelopes.
   rpc.raw = (method, payload) => send(method, payload)
+  rpc.request = request
+  rpc.event = (method, sessionId, accept = () => true) => frame(value => value.t === 'event'
+    && value.frame.method === method && value.frame.payload.sessionId === sessionId && accept(value.frame.payload))
   return rpc
 }
 
-async function observation() {
+async function observation(file = marker) {
   return waitFor(async () => {
-    try { return JSON.parse(await readFile(marker, 'utf8')) } catch (error) {
+    try { return JSON.parse(await readFile(file, 'utf8')) } catch (error) {
       if (error.code === 'ENOENT') return undefined
       throw error
     }
@@ -199,17 +238,37 @@ async function stop() {
 
 try {
   await mkdir(home, { recursive: true })
+  await mkdir(worktreeRepository)
+  execFileSync('git', ['init', '--quiet', worktreeRepository], { env })
+  execFileSync('git', ['-c', 'user.name=Runtime Smoke', '-c', 'user.email=runtime-smoke@example.invalid',
+    '-c', 'commit.gpgSign=false', 'commit', '--quiet', '--allow-empty', '-m', 'Initial worktree fixture'],
+  { cwd: worktreeRepository, env })
   await mkdir(legacyDirectory, { recursive: true })
   await writeFile(legacyFile, legacyBytes)
   await command(['plugin', '--profile', 'web', 'add', '-w', `@yuxianglin/dsh-bridge-browser@link:${bridge}`])
+  await command(['plugin', '--profile', 'web', 'add', `@deepseek-ai/dsh-experimental-tool-worktree@${expectedVersion}`])
   let rpc = await start(false)
   const created = await rpc('session.create', { sessionId, cwd: temp })
   assert.equal(created.sessionId, sessionId)
-  assert.equal((await observation()).sessionId, sessionId)
+  const initial = await observation()
+  assert.equal(initial.sessionId, sessionId)
+  for (const entry of worktreeSessions) {
+    await rpc('session.create', { sessionId: entry.sessionId, cwd: worktreeRepository })
+    await observation(`${marker}.${entry.sessionId}`)
+  }
+  const image = await rpc('session.attachment', { sessionId, attachment: initial.attachment })
+  assert.deepEqual(image.attachment, initial.attachment)
+  assert.equal(Buffer.from(image.data, 'base64').byteLength, initial.attachment.bytes)
+  assert.ok(image.attachment.width > 0 && image.attachment.height > 0)
   assert.ok((await rpc('session.list', {})).items.some(item => item.sessionId === sessionId))
   await rpc(BRIDGE_INJECT_BROWSER_SNAPSHOT_METHOD, { sessionId, snapshot: 'Page: runtime smoke snapshot' })
   const history = await rpc('session.history', { sessionId })
   assert.ok(Array.isArray(history.events))
+  const observedState = await rpc.event('session/state', sessionId, state => state.active && !state.running)
+  assert.equal(observedState.frame.payload.queue.some(item => item.placement === 'context'), true)
+  assert.equal(history.projections.values.imageLimits.maxImageBytes, 50 * 1024 * 1024)
+  const older = await rpc('session.history', { sessionId, beforeSeq: history.events.at(-1).event.seq, maxMessages: 1 })
+  assert.ok(older.events.every(({ event }) => event.seq < history.events.at(-1).event.seq))
   const selectedModel = { provider: 'smoke-provider', model: 'smoke-model' }
   assert.deepEqual((await rpc('session.models', { sessionId })).current, selectedModel)
   const injected = history.events.flatMap(({ event }) => event.type === 'agent/inbox/spliced' ? event.data.inserted : [])
@@ -225,9 +284,48 @@ try {
   await stop()
   rpc = await start(true)
   assert.equal((await observation()).source, 'prepared')
+  for (const entry of worktreeSessions) {
+    const worktree = await observation(`${marker}.${entry.sessionId}`)
+    await rpc('session.history', { sessionId: entry.sessionId })
+    await rpc('session.models', { sessionId: entry.sessionId })
+    await rpc('session.permissions', { sessionId: entry.sessionId })
+    await rpc('commands.list', { sessionId: entry.sessionId, passive: true })
+    await rpc('skills.list', { sessionId: entry.sessionId })
+    assert.equal((await rpc('session.state', { sessionId: entry.sessionId })).active, false,
+      'browsing history and composer directories must leave the Agent inactive')
+    if (entry.failCleanup) {
+      // 暂时撤销隔离仓库配置的读取权限，验证真实 Git 失败后的归档恢复和重试。
+      const gitConfig = join(worktreeRepository, '.git/config')
+      const configMode = (await stat(gitConfig)).mode
+      await chmod(gitConfig, 0)
+      try {
+        const failed = await rpc.request(BRIDGE_SESSION_PURGE_METHOD, { sessionId: entry.sessionId })
+        assert.equal(failed.ok, false, JSON.stringify(failed))
+        assert.match(failed.error.message, /worktree cleanup failed/)
+        assert.equal((await rpc('workspace.list', {})).archivedSessionIds.includes(entry.sessionId), false)
+        assert.ok((await rpc('session.list', {})).items.some(item => item.sessionId === entry.sessionId))
+        assert.ok((await rpc('session.history', { sessionId: entry.sessionId })).events.length > 0)
+      } finally {
+        await chmod(gitConfig, configMode)
+      }
+      await rm(`${marker}.cleanup-${entry.sessionId}`)
+    }
+    await rpc(BRIDGE_SESSION_PURGE_METHOD, { sessionId: entry.sessionId })
+    const cleanup = await observation(`${marker}.cleanup-${entry.sessionId}`)
+    assert.equal(cleanup.cleanup.status, entry.dirty ? 'retained' : 'removed')
+    assert.equal(existsSync(worktree.path), entry.dirty)
+    if (entry.dirty) assert.equal(await readFile(join(worktree.path, 'user-note.txt'), 'utf8'), 'Keep this file.\n')
+    execFileSync('git', ['show-ref', '--verify', `refs/heads/${worktree.branch}`], { cwd: worktreeRepository, env })
+  }
+  assert.equal((await rpc('session.state', { sessionId })).active, false)
+  await rpc('session.history', { sessionId, beforeSeq: 1, maxMessages: 1 })
+  assert.equal((await rpc('session.state', { sessionId })).active, false, 'passive pagination must leave a cold Agent inactive')
   assert.deepEqual((await rpc('session.models', { sessionId })).current, selectedModel)
   assert.ok((await rpc('session.list', {})).items.some(item => item.sessionId === sessionId))
   const reopened = (await rpc('session.history', { sessionId })).events
+  await rpc.event('session/state', sessionId, state => !state.active)
+  const restoredImage = await rpc('session.attachment', { sessionId, attachment: initial.attachment })
+  assert.equal(restoredImage.data, image.data)
   assert.deepEqual(reopened.slice(0, history.events.length), history.events)
   // A graceful shutdown disposes the Agent through agent-loop's teardown, which
   // cancels the live machine with `machine.cancel({ kind: 'disposed' })` and no
@@ -243,8 +341,7 @@ try {
   assert.equal(splice.data.outcome, 'canceled')
   assert.equal(splice.data.removedCount, 1)
   const reopenedLegacy = await rpc('session.history', { sessionId: legacySessionId })
-  // Following a cold Session activates it after the opening snapshot and may
-  // append seed/permission metadata. The migrated history prefix stays exact.
+  // 历史订阅保持被动读取，迁移后的历史前缀保持一致。
   assert.deepEqual(reopenedLegacy.events.slice(0, migrated.events.length), migrated.events)
   assert.deepEqual(await readFile(legacyFile), legacyBytes)
   // Composer controls: the panel reaches the Host permission preset table and
@@ -271,7 +368,11 @@ try {
   const permissionCommand = await rpc('commands.execute', { sessionId, line: '/permission read-only' })
   assert.equal(permissionCommand.result.kind, 'success')
   assert.equal((await rpc('session.permissions', { sessionId })).current, 'read-only')
+  await rpc('session.history', { sessionId })
   await rpc('session.setPermission', { sessionId, preset: 'danger-full-access' })
+  await rpc.event('session/projection', sessionId, projection => projection.changes.some(change => (
+    change.key === 'permissions' && change.val.currentValue === 'danger-full-access'
+  )))
   assert.equal((await rpc('session.permissions', { sessionId })).current, 'danger-full-access')
   await rpc('session.setPermission', { sessionId, preset: presetCatalog.defaultPreset })
   assert.equal((await rpc('session.permissions', { sessionId })).current, presetCatalog.defaultPreset)
@@ -289,7 +390,36 @@ try {
     typeof skill.name === 'string' && skill.name !== '' && typeof skill.modelInvocable === 'boolean'
   )))
 
-  console.log('Real DSH smoke passed: discovery, discovery beacon, token authentication, create/list/history, Session model selection, permission presets, Host commands and skills, V2 migration, V4 browser snapshots, and prepared projections after restart')
+  const retrySession = (await rpc('session.create', { cwd: temp })).sessionId
+  await rpc('session.selectModel', { sessionId: retrySession, provider: 'connection-check', model: 'connection-check' })
+  await Promise.all([
+    rpc('session.history', { sessionId: retrySession }),
+    rpc('session.history', { sessionId: retrySession }),
+    rpc('session.prompt', {
+      sessionId: retrySession, mode: 'queue', content: [{ type: 'text', text: 'Say hello.' }],
+    }),
+  ])
+  const originalCursor = (await rpc('session.state', { sessionId })).cursor
+  await rpc('session.setPermission', { sessionId, preset: 'read-only' })
+  await rpc.event('session/projection', sessionId, projection => projection.seq > originalCursor
+    && projection.changes.some(change => change.key === 'permissions' && change.val.currentValue === 'read-only'))
+  await rpc.event('session/state', sessionId, state => state.cursor > originalCursor)
+  const failed = await rpc.event('session/projection', retrySession, projection => projection.changes.some(change => (
+    change.key === 'conversationContinuation' && typeof change.val === 'number'
+  )))
+  const failureSeq = failed.frame.payload.seq
+  await rpc.event('session/state', retrySession, state => !state.running && state.cursor >= failureSeq)
+  await rpc('session.prompt', { sessionId: retrySession, mode: 'queue', content: [] })
+  await rpc.event('session/event', retrySession, payload => payload.event.type === 'turn/end' && payload.event.seq > failureSeq)
+  const retried = await rpc('session.history', { sessionId: retrySession })
+  const messages = retried.events.filter(({ event }) => event.type === 'user/message').map(({ event }) => event.data)
+  assert.equal(messages.filter(message => message.source.kind === 'user').length, 1)
+  assert.ok(messages.some(message => message.source.kind === 'retry' && message.content.length === 0))
+  const endings = retried.events.filter(({ event }) => event.type === 'turn/end')
+  assert.equal(endings.length, 2)
+  assert.ok(endings.every(({ event }) => event.data.reason.kind === 'error' && event.data.reason.error.code === 'TRANSPORT'))
+
+  console.log('Real DSH smoke passed: discovery, authentication, image storage and reads, passive history, concurrent history and prompt admission, independent session observations, model and permission selection, Host commands and skills, V2 migration, browser context, continuation after a real transport failure, and session deletion including worktree cleanup failure and retry')
   succeeded = true
 } catch (error) {
   console.error(hostLog)

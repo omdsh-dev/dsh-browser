@@ -32,7 +32,7 @@ dsh 的**浏览器操作桥**挂载经过 token 认证的 WebSocket 通道（`/e
 
 桥接插件和扩展共用一个 pnpm workspace。桥接源码直接导入 `@deepseek-ai/cordis` 和 `@deepseek-ai/schemastery`，DSH 依赖与工作区固定版本保持一致。根目录构建命令先构建桥接插件，再构建扩展。
 
-插件清单自带这层声明：`engines.dsh`（`^0.2.1-rc.5`）与 `dsh.manifestVersion: 1` 让 dsh 在加载插件前拒绝不兼容的宿主；插件页直接读取 `locale/en.json` / `locale/zh.json` 里的标题与简介、以及 `icon.svg` 图标来展示，无需激活插件。
+插件清单自带这层声明：`engines.dsh`（`^0.2.2-rc.2`）与 `dsh.manifestVersion: 1` 让 dsh 在加载插件前拒绝不兼容的宿主；插件页直接读取 `locale/en.json` / `locale/zh.json` 里的标题与简介、以及 `icon.svg` 图标来展示，无需激活插件。
 
 ## 面板驱动的 Host 方法
 
@@ -46,6 +46,10 @@ dsh 的**浏览器操作桥**挂载经过 token 认证的 WebSocket 通道（`/e
 | `commands.list` | `{ sessionId }` | 以会话 agent 为作用域的 `commands/list` | `{ commands: [{ name, description, hint?, definitionId? }], provisional }` |
 | `commands.execute` | `{ sessionId, line }` | 附件列表为空的 `commands/execute` | `{ commandId, result }`；未知命令行返回 `bad-request` |
 | `skills.list` | `{ sessionId }` | 该会话组合的 `skills/list` | `{ skills: [{ name, description, whenToUse?, modelInvocable, path? }], provisional }` |
+
+打开 `session.history` 时，通过 `session/follow` 激活会话；带有 `beforeSeq` 的请求通过 `session/events` 读取更早的历史。桥接的 `session/state` 事件来自 `session/observeState`，`session/projection` 事件来自 `session/observeProjections`，携带 `{ sessionId, seq, changes }`。
+
+`session.attachment` 接收 `{ sessionId, attachment }`，其中 `attachment` 是完整图片引用。当 `conversationContinuation` 投影允许且会话空闲时，面板通过 `session.prompt` 的 `content: []` 继续生成。删除会话会先等待宿主完成归档触发的 worktree 清理，再移除会话日志。
 
 失败语义：未挂载权限服务的宿主会让 `session.permissions` 返回 `routable: false` 而不是报错，面板据此隐藏控件；部署的桥未实现某方法时返回 `not-found`（`… is unavailable`），使较新的面板可以降级而不是崩掉。`commands.execute` 会拒绝不符合宿主命令语法的行，宿主返回的未知命令名会被报告为 `bad-request`，而不是空成功。
 

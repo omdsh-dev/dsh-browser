@@ -8,7 +8,7 @@ type EventFrame = Extract<ServerFrame, { t: 'event' }>
  */
 export class TransientEventCache {
   private readonly questions = new Map<string, EventFrame>()
-  private readonly running = new Map<string, EventFrame>()
+  private readonly states = new Map<string, EventFrame>()
 
   ingest(frame: ServerFrame): void {
     if (frame.t !== 'event' || !isRecord(frame.frame.payload)) return
@@ -26,21 +26,22 @@ export class TransientEventCache {
       }
       return
     }
+    if (frame.frame.method === 'session/state') {
+      this.states.set(sessionId, frame)
+      return
+    }
     if (frame.frame.method !== 'session/event' || !isRecord(payload.event)) return
-    if (payload.event.type === 'turn/start') {
-      this.running.set(sessionId, frame)
-    } else if (payload.event.type === 'turn/end') {
-      this.running.delete(sessionId)
+    if (payload.event.type === 'turn/end') {
       this.deleteSessionQuestions(sessionId)
     }
   }
 
   replay(): EventFrame[] {
-    return [...this.running.values(), ...this.questions.values()]
+    return [...this.states.values(), ...this.questions.values()]
   }
 
   clear(): void {
-    this.running.clear()
+    this.states.clear()
     this.questions.clear()
   }
 

@@ -24,6 +24,8 @@ import type {} from '@deepseek-ai/dsh-attachment'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-session-persistence'
+import type {} from '@deepseek-ai/dsh-session-query'
+import type {} from '@deepseek-ai/dsh-experimental-worktree'
 import type { WebRoute, WebUpgradeRoute } from '@deepseek-ai/dsh-host-webserver'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { BridgeServer } from './server.ts'
@@ -138,10 +140,10 @@ export async function apply(ctx: Context, resolved: ResolvedConfig): Promise<voi
   const gateway = ctx.get('typertGateway') as unknown as GatewayCandidate | undefined
   const connection = ctx.get('connection') as unknown as HostConnectionLike | undefined
   if (gateway === undefined || !hasRemoteWireStream(gateway)) {
-    throw new Error('bridge-browser: dsh 0.2.1-rc.5 is required (Gateway wireStream unavailable)')
+    throw new Error('bridge-browser: dsh 0.2.2-rc.2 is required (Gateway wireStream unavailable)')
   }
   if (connection === undefined || typeof connection.createPeer !== 'function') {
-    throw new Error('bridge-browser: dsh 0.2.1-rc.5 is required (connection.createPeer unavailable)')
+    throw new Error('bridge-browser: dsh 0.2.2-rc.2 is required (connection.createPeer unavailable)')
   }
   const tokenRes = await resolveToken(resolved.token)
   mountBridge(ctx, resolved, tokenRes, createRemoteHostApi(gateway, connection))
@@ -204,6 +206,14 @@ function mountBridge(
         return persistence.open(id as Parameters<typeof persistence.open>[0], 'write')
       },
       archiveSession: async (id) => {
+        const workspace = await api.call({
+          rpcId: randomUUID(), method: 'workspace.list', payload: {}, signal: new AbortController().signal,
+        })
+        if (!workspace.ok) throw new Error(workspace.error.message)
+        if (!isRecord(workspace.value) || !Array.isArray(workspace.value.archivedSessionIds)) {
+          throw new TypeError('workspace.list returned an invalid archive set')
+        }
+        const wasArchived = workspace.value.archivedSessionIds.includes(id)
         const archived = await api.call({
           rpcId: randomUUID(),
           method: 'workspace.archiveSession',
@@ -211,6 +221,25 @@ function mountBridge(
           signal: new AbortController().signal,
         })
         if (!archived.ok) throw new Error(archived.error.message)
+        if (wasArchived) return
+        return async () => {
+          const restored = await api.call({
+            rpcId: randomUUID(), method: 'workspace.unarchiveSession', payload: { sessionId: id },
+            signal: new AbortController().signal,
+          })
+          if (!restored.ok) throw new Error(restored.error.message)
+        }
+      },
+      waitForArchiveCleanup: async (id) => {
+        const worktrees = ctx.get('worktrees')
+        if (worktrees === undefined) return
+        const query = ctx.get('sessionQuery')
+        if (query === undefined) throw new Error('session query is required to finish worktree cleanup')
+        const session = await query.inspectSession(id as Parameters<typeof query.inspectSession>[0], session => session)
+        const pending = await worktrees.cleanupOf(session, null)
+        const cleanup = pending?.status === 'scheduled'
+          ? await worktrees.cleanupOf(session, pending.revision) : pending
+        if (cleanup?.status === 'failed') throw new Error('worktree cleanup failed')
       },
     }
     await purgeSessionFiles(deps, sessionId)

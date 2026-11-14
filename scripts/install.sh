@@ -316,6 +316,8 @@ profile_has_dependency() {
 
 require_command pnpm "未找到 pnpm；请先启用 Corepack 或安装 pnpm。" "pnpm was not found; enable Corepack or install pnpm first."
 require_command node "未找到 Node.js；请先安装受支持的 Node.js 版本。" "Node.js was not found; install a supported Node.js version first."
+node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 24 || (major === 24 && minor >= 9) ? 0 : 1)' ||
+  fail_pair "需要 Node.js 24.9.0 或更新版本。" "Node.js 24.9.0 or newer is required."
 require_command rsync "未找到 rsync；请先安装 rsync。" "rsync was not found; install rsync first."
 
 print_step 1 "构建浏览器桥" "Build the browser bridge"
@@ -410,6 +412,6 @@ print_pair "• 点击工具栏中的 DeepSeek 鲸鱼图标，打开侧边栏" "
 print_pair "• 扩展会自动发现本机 dsh，无需填写地址或 token" "The extension discovers local dsh automatically; no address or token is required"
 printf '• 启动固定版本：cd %q && pnpm start\n' "$ROOT"
 printf '   Start the pinned version: cd %q && pnpm start\n' "$ROOT"
-print_pair "• 或直接启动固定版本：npx @deepseek-ai/dsh@0.2.1-rc.5 web" "Or start the pinned version directly: npx @deepseek-ai/dsh@0.2.1-rc.5 web"
+print_pair "• 或直接启动固定版本：npx @deepseek-ai/dsh@0.2.2-rc.2 web" "Or start the pinned version directly: npx @deepseek-ai/dsh@0.2.2-rc.2 web"
 printf '\n'
 print_pair "如果用得顺手，欢迎在 GitHub 点个 Star 支持我们：https://github.com/Lum1104/dsh-browser" "If dsh-browser is useful to you, we'd appreciate a Star on GitHub: https://github.com/Lum1104/dsh-browser"

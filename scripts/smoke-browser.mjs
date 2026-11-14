@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
+import { createConnection, createServer as createTcpServer } from 'node:net'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -29,6 +30,11 @@ let host
 let browser
 let hostLog = ''
 const results = []
+let bridgeProxy
+let bridgeOnline = true
+const bridgeSockets = new Set()
+const pendingSockets = new Set()
+let pendingRequests = 0
 
 async function waitFor(check, label, timeout = 60_000) {
   const deadline = Date.now() + timeout
@@ -95,6 +101,20 @@ const server = createServer((request, response) => {
 server.listen(0, '127.0.0.1')
 await once(server, 'listening')
 const origin = `http://127.0.0.1:${server.address().port}`
+const unavailableServer = createTcpServer()
+unavailableServer.listen(0, '127.0.0.1')
+await once(unavailableServer, 'listening')
+const unavailablePort = unavailableServer.address().port
+await new Promise(resolve => unavailableServer.close(resolve))
+// 保持真实 TCP 请求未响应，用于验证停止生成和断线期间的状态变化。
+const pendingServer = createTcpServer(socket => {
+  pendingSockets.add(socket)
+  socket.once('data', () => { pendingRequests += 1 })
+  socket.on('close', () => { pendingSockets.delete(socket) })
+})
+pendingServer.listen(0, '127.0.0.1')
+await once(pendingServer, 'listening')
+const pendingPort = pendingServer.address().port
 
 try {
   await command(['plugin', '--profile', 'web', 'add', '-w', `@yuxianglin/dsh-bridge-browser@link:${bridge}`])
@@ -102,7 +122,22 @@ try {
   await writeFile(patch, [
     '- id: bridge-browser', '  config:', `    token: ${JSON.stringify(token)}`,
     '    sessionWorkspacePath: ""',
-    '- id: tools', '  config:', '    mode: native',
+    '- id: tool-executor-native', '  disabled: false',
+    '- id: tool-executor-ptc', '  disabled: true',
+    '- id: agent-default-model', '  config:',
+    '    provider: connection-check', '    model: connection-check',
+    '- id: llm-pi-ai', '  config:', '    providers:', '      connection-check:',
+    '        api: openai-completions',
+    `        baseURL: http://127.0.0.1:${unavailablePort}/v1`,
+    '        headers:', '          Authorization: Bearer local-connection-check',
+    '        models:', '          - id: connection-check', '            input: [text, image]',
+    '          - id: connection-check-next', '            input: [text, image]',
+    '        retryPolicy:', '          mode: normal', '          maxRetries: 0',
+    '      pending-check:', '        api: openai-completions',
+    `        baseURL: http://127.0.0.1:${pendingPort}/v1`,
+    '        headers:', '          Authorization: Bearer local-pending-check',
+    '        models:', '          - id: pending-check',
+    '        retryPolicy:', '          mode: normal', '          maxRetries: 0',
     '- insert:', '    - id: browser-smoke-probe',
     `      name: ${JSON.stringify(pathToFileURL(join(root, 'scripts/fixtures/browser-probe.mjs')).href)}`,
     '      config:', `        token: ${JSON.stringify(token)}`, '',
@@ -115,9 +150,30 @@ try {
   const configResponse = await fetch(`${base}/ext/bridge-config`)
   assert.equal(configResponse.status, 200)
   const config = await configResponse.json()
+  const hostPort = Number(new URL(config.wsUrl).port)
+  bridgeProxy = createTcpServer(client => {
+    if (!bridgeOnline) { client.destroy(); return }
+    const upstream = createConnection({ host: '127.0.0.1', port: hostPort })
+    bridgeSockets.add(client)
+    bridgeSockets.add(upstream)
+    client.on('close', () => { bridgeSockets.delete(client); upstream.destroy() })
+    upstream.on('close', () => { bridgeSockets.delete(upstream); client.destroy() })
+    client.pipe(upstream).pipe(client)
+  })
+  bridgeProxy.listen(0, '127.0.0.1')
+  await once(bridgeProxy, 'listening')
+  config.wsUrl = `ws://127.0.0.1:${bridgeProxy.address().port}/ext/bridge`
   const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' }
-  const tool = async (name, args) => {
-    const response = await fetch(probe, { method: 'POST', headers, body: JSON.stringify({ name, args }), signal: AbortSignal.timeout(35_000) })
+  const hostRpc = async (namespace, method, request) => {
+    const response = await fetch(probe, {
+      method: 'POST', headers, body: JSON.stringify({ rpc: { namespace, method, args: { request } } }),
+      signal: AbortSignal.timeout(35_000),
+    })
+    assert.equal(response.ok, true)
+    return response.json()
+  }
+  const tool = async (name, args, cancelAfterMs) => {
+    const response = await fetch(probe, { method: 'POST', headers, body: JSON.stringify({ name, args, cancelAfterMs }), signal: AbortSignal.timeout(35_000) })
     assert.equal(response.status, 200)
     return response.json()
   }
@@ -319,11 +375,139 @@ try {
     const style = getComputedStyle(element); return [style.marginTop, style.marginRight, style.marginBottom, style.marginLeft]
   }), ['12px', '3px', '4px', '5px'])
   results.push('stylesheet rule edits preserve unrelated declarations and rules')
+  const cancelStarted = performance.now()
+  const canceled = await tool('browser_wait', { ms: 10_000 }, 500)
+  assert.equal(canceled.isError, true, JSON.stringify(canceled))
+  assert.ok(performance.now() - cancelStarted < 5_000, 'browser cancellation must settle before the requested wait')
+  succeed(await tool('browser_get_text', { selector: '#unrelated' }))
+  results.push('canceling an executing browser tool releases the next call')
+
+  // 通过正式界面上传图片，并用真实连接失败验证继续生成。
+  await worker.evaluate(async () => { await chrome.storage.local.set({ dshPanelUiLocale: 'en' }) })
+  const chat = await browser.newPage()
+  await chat.goto(`chrome-extension://${extensionId}/panel/index.html`)
+  await page.bringToFront()
+  const composer = chat.locator('textarea')
+  await composer.waitFor()
+  await waitFor(() => composer.isEnabled(), 'chat session readiness')
+  await chat.locator('input[type=file]').setInputFiles(join(root, 'extensions/dsh-browser/assets/icons/icon32.png'))
+  await composer.fill('Describe this image.')
+  await chat.getByRole('button', { name: 'Send message', exact: true }).click()
+  const continueButton = chat.getByRole('button', { name: 'Continue generating', exact: true })
+  await continueButton.waitFor({ timeout: 30_000 })
+  const preview = chat.locator('.message-image img')
+  await preview.waitFor()
+  assert.equal(await preview.evaluate(image => image.complete && image.naturalWidth > 0), true)
+  assert.equal(await chat.locator('.row.user').count(), 1)
+  await composer.fill('Keep this draft.')
+
+  const bridgeRpc = async (method, payload) => {
+    const id = await panel.evaluate(({ method, payload }) => {
+      const id = crypto.randomUUID()
+      panelPort.postMessage({ type: 'rpc', id, method, payload })
+      return id
+    }, { method, payload })
+    const response = await waitFor(() => panel.evaluate(id => messages.find(message => (
+      message.type === 'rpc.result' && message.id === id
+    )), id), `panel ${method}`)
+    assert.equal(response.ok, true, JSON.stringify(response))
+    assert.equal(response.result.result.ok, true, JSON.stringify(response.result))
+    return response.result.result.value
+  }
+  const listed = await bridgeRpc('session.list', {})
+  const conversation = listed.items.find(item => !item.blank)
+  assert.ok(conversation, JSON.stringify(listed))
+  await continueButton.click()
+  await waitFor(async () => {
+    const history = await bridgeRpc('session.history', { sessionId: conversation.sessionId })
+    return history.events.filter(({ event }) => event.type === 'turn/end').length === 2
+  }, 'continued browser conversation')
+  await continueButton.waitFor()
+  assert.equal(await composer.inputValue(), 'Keep this draft.')
+  assert.equal(await chat.locator('.row.user').count(), 1)
+  const history = await bridgeRpc('session.history', { sessionId: conversation.sessionId })
+  assert.ok(history.events.some(({ event }) => event.type === 'user/message'
+    && event.data.source.kind === 'retry' && event.data.content.length === 0))
+  results.push('image previews load through full attachment references and continuation preserves the composer draft')
+  await bridgeRpc('session.selectModel', {
+    sessionId: conversation.sessionId, provider: 'connection-check', model: 'connection-check-next',
+  })
+  await waitFor(async () => (await chat.locator('.composer-model > button').textContent()).includes('connection-check-next'),
+    'model selection projection in the panel')
+  await bridgeRpc('session.setPermission', { sessionId: conversation.sessionId, preset: 'read-only' })
+  await waitFor(async () => (await chat.getByRole('button', { name: 'Permission preset', exact: true }).textContent()).includes('Read only'),
+    'permission projection in the panel')
+  results.push('model and permission changes made outside the panel update its controls')
+
+  const secondChat = await browser.newPage()
+  await secondChat.goto(`chrome-extension://${extensionId}/panel/index.html`)
+  await page.bringToFront()
+  const secondComposer = secondChat.locator('textarea')
+  await waitFor(() => secondComposer.isEnabled(), 'second panel readiness')
+  await secondComposer.fill('A separate conversation in another panel.')
+  await secondChat.getByRole('button', { name: 'Send message', exact: true }).click()
+  await secondChat.getByRole('button', { name: 'Continue generating', exact: true }).waitFor({ timeout: 30_000 })
+  const secondConversation = (await bridgeRpc('session.list', {})).items.find(item => (
+    !item.blank && item.sessionId !== conversation.sessionId
+  ))
+  assert.ok(secondConversation)
+  await hostRpc('session', 'selectModel', {
+    sessionId: conversation.sessionId, provider: 'pending-check', model: 'pending-check',
+  })
+  await waitFor(async () => (await chat.locator('.composer-model > button').textContent()).includes('pending-check'),
+    'first panel model update while second panel is open')
+  await composer.fill('Wait for a response so this turn can be canceled.')
+  await chat.getByRole('button', { name: 'Send message', exact: true }).click()
+  const stopButton = chat.getByRole('button', { name: 'Stop generating', exact: true })
+  await stopButton.waitFor()
+  await waitFor(() => pendingRequests > 0, 'pending provider request')
+  await stopButton.click()
+  await waitFor(async () => await stopButton.count() === 0, 'cancelled turn state in first panel')
+  assert.equal(await secondChat.getByRole('button', { name: 'Continue generating', exact: true }).count(), 1)
+  results.push('two panels retain independent subscriptions and stopping one preserves the other panel')
+
+  const beforeReconnect = pendingRequests
+  await composer.fill('Finish this turn while the bridge is disconnected.')
+  await chat.getByRole('button', { name: 'Send message', exact: true }).click()
+  await stopButton.waitFor()
+  await waitFor(() => pendingRequests > beforeReconnect, 'second pending provider request')
+  await composer.fill('Keep this draft across reconnect.')
+  await panel.evaluate(() => { messages.length = 0 })
+  bridgeOnline = false
+  for (const socket of bridgeSockets) socket.destroy()
+  await waitFor(() => panel.evaluate(() => messages.some(message => (
+    message.type === 'status' && message.state === 'reconnecting'
+  ))), 'bridge disconnection')
+  await hostRpc('session', 'cancel', { sessionId: conversation.sessionId })
+  await waitFor(async () => !(await hostRpc('session', 'state', { sessionId: conversation.sessionId })).running,
+    'host turn completion during disconnection')
+  await hostRpc('session', 'selectModel', {
+    sessionId: conversation.sessionId, provider: 'connection-check', model: 'connection-check-next',
+  })
+  bridgeOnline = true
+  await waitFor(() => panel.evaluate(() => messages.some(message => (
+    message.type === 'status' && message.state === 'connected'
+  ))), 'bridge reconnection')
+  await waitFor(async () => await stopButton.count() === 0, 'restored idle state after reconnect')
+  await waitFor(async () => (await chat.locator('.composer-model > button').textContent()).includes('connection-check-next'),
+    'restored model after reconnect')
+  assert.equal(await composer.inputValue(), 'Keep this draft across reconnect.')
+  await hostRpc('session', 'selectModel', {
+    sessionId: conversation.sessionId, provider: 'connection-check', model: 'connection-check',
+  })
+  await waitFor(async () => (await chat.locator('.composer-model > button').textContent()).trim() === 'connection-check',
+    'live projection after reconnect')
+  await secondChat.getByRole('button', { name: 'Continue generating', exact: true }).waitFor()
+  results.push('reconnection restores both panels, completed turn state, history and live projections without losing drafts')
   await writeFile(join(directory, 'results.json'), JSON.stringify(results, null, 2))
   console.log(`Browser smoke passed: ${results.join('; ')}`)
   console.log(`Evidence: ${directory}`)
 } finally {
   if (browser) await browser.close()
+  for (const socket of bridgeSockets) socket.destroy()
+  if (bridgeProxy) await new Promise(resolve => bridgeProxy.close(resolve))
+  for (const socket of pendingSockets) socket.destroy()
+  await new Promise(resolve => pendingServer.close(resolve))
   if (host && host.exitCode === null && host.signalCode === null) {
     host.kill('SIGTERM')
     await once(host, 'exit')
