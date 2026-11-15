@@ -1,4 +1,4 @@
-# dsh Browser Control [![dshfind](https://dshfind.com/api/badge/Lum1104/dsh-browser?lang=zh)](https://dshfind.com/zh/plugins/Lum1104/dsh-browser?ref=badge)
+# dsh Browser Control
 
 **English** | [中文](README.zh.md)
 

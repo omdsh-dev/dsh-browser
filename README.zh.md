@@ -1,4 +1,4 @@
-# dsh 浏览器操作 [![dshfind](https://dshfind.com/api/badge/Lum1104/dsh-browser?lang=zh)](https://dshfind.com/zh/plugins/Lum1104/dsh-browser?ref=badge)
+# dsh 浏览器操作
 
 [English](README.md) | **中文**
 
