@@ -1033,6 +1033,34 @@ describe('background bridge lifecycle', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['localhost', 'ws://localhost:3080/ext/bridge'],
+    ['IPv6 loopback', 'ws://[::1]:3080/ext/bridge'],
+  ])('reaches a manual %s address through the CSP-allowed loopback origin', async (_alias, bridgeUrl) => {
+    const chromeMock = mockChrome({
+      localGet: async () => ({ dshSettings: { bridgeUrl } }),
+    })
+    // The extension's connect-src lists only 127.0.0.1, so the browser blocks
+    // every other loopback alias before the request reaches the host. The
+    // requested bridge is the only instance listening on this machine.
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const target = new URL(String(input))
+      if (target.hostname !== '127.0.0.1') throw new TypeError('Failed to fetch: blocked by connect-src')
+      if (target.port !== '3080') return new Response(null, { status: 503 })
+      return new Response(JSON.stringify({ wsUrl: `ws://127.0.0.1:${target.port}/ext/bridge` }), { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    await import('../src/background/index.ts')
+
+    const panel = panelPort()
+    chromeMock.onConnect.emit(panel.port)
+    await vi.waitFor(() => { expect(FakeWebSocket.instances).toHaveLength(1) })
+
+    expect(FakeWebSocket.instances[0]!.url).toBe('ws://127.0.0.1:3080/ext/bridge')
+    expect(String(fetchMock.mock.calls[0]![0])).toBe('http://127.0.0.1:3080/ext/bridge-config')
+  })
+
   it('does not probe again while the lease remembers a confirmed miss', async () => {
     const chromeMock = mockChrome({
       // DSH stayed stopped across a service-worker restart: the latch survives.

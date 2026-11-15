@@ -165,6 +165,25 @@ function isLocalBridgeAddress(url: string): boolean {
   }
 }
 
+/**
+ * 把回环别名统一成扩展 CSP 允许的 `127.0.0.1`。
+ *
+ * `isLocalBridgeAddress` 接受 `localhost` / `::1`，但扩展 `connect-src` 只列了
+ * `127.0.0.1`：用别名探测时 fetch 会先被扩展自己的 CSP 拦掉，预检因此失败，
+ * 自动探测又把该端口当作「已试过」排除；于是一个明明在该端口监听的服务反而
+ * 连不上（或者误连到另一个本机实例）。只改连接地址，不改用户保存的设置。
+ */
+function canonicalLoopbackUrl(raw: string): string {
+  if (!isLocalBridgeAddress(raw)) return raw
+  try {
+    const parsed = new URL(raw)
+    parsed.hostname = '127.0.0.1'
+    return parsed.toString()
+  } catch {
+    return raw
+  }
+}
+
 /** 记下成功的地址，供下次面板打开时优先尝试。 */
 function rememberBridgeUrl(url: string): void {
   if (lastBridgeUrl === url) return
@@ -1658,6 +1677,8 @@ async function startBridge(): Promise<void> {
   const lease = (): boolean => revision === bridgeStartRevision && panelPorts.size > 0
   let url = settings.bridgeUrl
   if (url !== '') {
+    // The extension CSP only whitelists 127.0.0.1; probe and connect through it.
+    url = canonicalLoopbackUrl(url)
     if (isLocalBridgeAddress(url) && !await probeBridge(url)) {
       if (!lease()) return
       url = await discoverBridgeUrl(lease, url) ?? ''
