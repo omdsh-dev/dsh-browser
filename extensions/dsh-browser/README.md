@@ -53,6 +53,8 @@ For extension development, load `extensions/dsh-browser/dist/` from `chrome://ex
 
 See the root README for [installation, updates, startup, and uninstall](../../README.md#detailed-installation-and-usage).
 
+The side panel follows your system's light or dark appearance and updates when it changes.
+
 ## Composer controls: permission, model, commands, and skills
 
 The composer carries the same controls the Web GUI exposes, backed by Host

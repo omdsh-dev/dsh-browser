@@ -27,3 +27,6 @@ jobs:
       - run: pnpm run test
       - run: pnpm run build
       - run: pnpm run test:smoke
+      - name: Install Chromium
+        run: pnpm --filter @yuxianglin/dsh-bridge-browser exec playwright-core install --with-deps chromium
+      - run: pnpm run test:browser

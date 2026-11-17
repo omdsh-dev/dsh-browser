@@ -53,6 +53,8 @@ pnpm --filter dsh-browser-extension run test
 
 安装、更新、启动和卸载方式见根目录 README 的[详细安装与使用](../../README.zh.md#详细安装与使用)。
 
+侧栏会跟随系统的浅色或深色外观，并在系统外观变化时自动更新。
+
 ## 输入区控制：权限模式、模型、命令与 Skill
 
 输入区提供与 Web GUI 对齐的控件，全部由桥插件自有的 Host 方法支撑：

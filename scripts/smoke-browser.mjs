@@ -2,10 +2,11 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { createConnection, createServer as createTcpServer } from 'node:net'
 import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -20,8 +21,7 @@ const cli = join(dirname(require.resolve('@deepseek-ai/dsh/package.json')), 'lib
 const artifacts = join(root, '.artifacts/browser-smoke')
 await mkdir(artifacts, { recursive: true })
 const directory = await mkdtemp(join(artifacts, 'run-'))
-const runtimeTmp = join(directory, 'tmp')
-await mkdir(runtimeTmp)
+const runtimeTmp = await mkdtemp(join(tmpdir(), 'dsh-browser-'))
 const token = randomUUID()
 const env = { ...process.env, DSH_HOME: join(directory, 'home'), TMPDIR: runtimeTmp, DSH_TELEMETRY_DISABLED: '1' }
 delete env.DSH_EXT_TOKEN
@@ -54,6 +54,43 @@ async function command(args) {
   child.stderr.on('data', data => { output += data })
   const [code] = await once(child, 'exit')
   assert.equal(code, 0, output)
+}
+
+async function verifyPanelTheme(page, scheme, selectors) {
+  await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' })
+  await waitFor(() => page.evaluate(expected => getComputedStyle(document.documentElement).colorScheme === expected, scheme),
+    `${scheme} panel color scheme`)
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  const swatches = await page.evaluate(selectors => {
+    const channels = color => color.match(/[\d.]+/g).map(Number)
+    const background = element => {
+      const [r, g, b, alpha = 1] = channels(getComputedStyle(element).backgroundColor)
+      if (alpha === 1) return [r, g, b]
+      const behind = element.parentElement ? background(element.parentElement) : [255, 255, 255]
+      return [r, g, b].map((channel, index) => channel * alpha + behind[index] * (1 - alpha))
+    }
+    return selectors.map(selector => {
+      const element = document.querySelector(selector)
+      if (!element) throw new Error(`Missing theme test element: ${selector}`)
+      return { selector, disabled: element.matches(':disabled'), foreground: channels(getComputedStyle(element).color), background: background(element) }
+    })
+  }, selectors)
+  for (const swatch of swatches) {
+    const foreground = relativeLuminance(swatch.foreground)
+    const background = relativeLuminance(swatch.background)
+    const contrast = (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05)
+    if (!swatch.disabled) assert.ok(contrast >= 4.5, `${scheme} ${swatch.selector}: text contrast ${contrast.toFixed(2)}`)
+    assert.ok(scheme === 'dark' ? background < 0.15 : background > 0.75,
+      `${scheme} ${swatch.selector}: background luminance ${background.toFixed(2)}`)
+  }
+}
+
+function relativeLuminance(channels) {
+  const linear = channels.slice(0, 3).map(channel => {
+    const srgb = channel / 255
+    return srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4
+  })
+  return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722
 }
 
 const inner = `<!doctype html><body style="margin:0;min-height:1000px"><button id="inner" style="position:absolute;left:20px;top:20px;width:100px;height:50px">Inner target</button>
@@ -401,6 +438,25 @@ try {
   assert.equal(await chat.locator('.row.user').count(), 1)
   await composer.fill('Keep this draft.')
 
+  const chatViewport = chat.viewportSize()
+  await chat.setViewportSize({ width: 420, height: 900 })
+  for (const scheme of ['light', 'dark', 'light']) {
+    await verifyPanelTheme(chat, scheme, ['body', '.session-menu-trigger', '.new-session-trigger', '.row.user .body', '.composer textarea'])
+    await chat.screenshot({ path: join(directory, `theme-${scheme}-chat.png`), animations: 'disabled' })
+    await chat.getByRole('button', { name: 'Permission preset', exact: true }).click()
+    await chat.getByRole('option', { name: 'Full access', exact: true }).click()
+    await verifyPanelTheme(chat, scheme, ['.approval-heading h2', '.approval-detail strong', '.approval-actions .deny'])
+    await chat.screenshot({ path: join(directory, `theme-${scheme}-permission.png`), animations: 'disabled' })
+    await chat.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await chat.getByRole('button', { name: 'Open settings', exact: true }).click()
+    await verifyPanelTheme(chat, scheme, ['.settings h1', '.settings input', '.settings select', '.update-status strong'])
+    await chat.screenshot({ path: join(directory, `theme-${scheme}-settings.png`), animations: 'disabled' })
+    await chat.getByRole('button', { name: 'Back to chat', exact: true }).click()
+    assert.equal(await composer.inputValue(), 'Keep this draft.')
+  }
+  await chat.setViewportSize(chatViewport)
+  results.push('panel follows live light/dark changes with readable chat, permission dialog and settings text and preserves the draft')
+
   const bridgeRpc = async (method, payload) => {
     const id = await panel.evaluate(({ method, payload }) => {
       const id = crypto.randomUUID()
@@ -515,4 +571,5 @@ try {
   await new Promise(resolve => server.close(resolve))
   await new Promise(resolve => childServer.close(resolve))
   await writeFile(join(directory, 'host.log'), hostLog)
+  await rm(runtimeTmp, { recursive: true, force: true })
 }
