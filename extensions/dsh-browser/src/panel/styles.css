@@ -3503,3 +3503,191 @@ textarea:focus-visible {
   color: var(--ink);
   cursor: pointer;
 }
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --canvas: #111722;
+    --canvas-deep: #1b2433;
+    --surface: #1d2736;
+    --ink: #dde4ef;
+    --ink-strong: #f2f5fa;
+    --muted: #adb9cc;
+    --faint: #98a6bd;
+    --line: #344156;
+    --line-strong: #465570;
+    --blue-ink: #b0bfff;
+    --blue-soft: #263458;
+    --blue-wash: #202c44;
+    --danger: #ffaba3;
+    --danger-soft: #3c252b;
+    --danger-border: #75434a;
+    --security: #efc56f;
+    --security-soft: #352e20;
+    --security-border: #6e5930;
+    --shadow: 0 10px 28px rgba(0, 0, 0, 0.28), 0 2px 6px rgba(0, 0, 0, 0.18);
+  }
+
+  * {
+    scrollbar-color: var(--line-strong) transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--line-strong);
+  }
+
+  .topbar {
+    border-color: var(--line);
+    background: var(--surface);
+  }
+
+  .tab-affinity {
+    border-color: var(--security-border);
+    background: var(--security-soft);
+  }
+
+  .tab-affinity.background {
+    border-color: var(--line-strong);
+    background: var(--blue-wash);
+  }
+
+  .tab-affinity.lost {
+    border-color: var(--danger-border);
+    background: var(--danger-soft);
+  }
+
+  .tab-affinity-node::before,
+  .update-beacon,
+  .draft-image > button {
+    border-color: var(--surface);
+  }
+
+  .tab-affinity-actions .return:hover {
+    background: var(--blue-wash);
+  }
+
+  .tab-affinity-actions .keep:hover {
+    border-color: var(--line-strong);
+    background: var(--canvas-deep);
+  }
+
+  .tab-affinity-actions .keep-always:hover,
+  .question-actions .secondary:hover:not(:disabled),
+  .update-check:hover:not(:disabled),
+  .bridge-detection-actions button:hover,
+  .settings input:hover,
+  .settings select:hover,
+  .settings-actions .secondary:hover {
+    border-color: var(--line-strong);
+  }
+
+  .scroll-to-bottom:hover,
+  .empty button:hover:not(:disabled),
+  .question-option:hover,
+  .question-option.checked,
+  .composer-box:focus-within {
+    border-color: var(--blue);
+  }
+
+  .empty-logo,
+  .empty button,
+  .row.user .body,
+  .assistant-avatar,
+  .tool-activity,
+  .tool-activity.running,
+  .question-card,
+  .question-mark,
+  .page-selection-chip,
+  .install-pill.install-managed,
+  .version-pill,
+  .update-card {
+    border-color: var(--line-strong);
+  }
+
+  .row.user .body {
+    color: var(--ink);
+  }
+
+  .row.tool::before,
+  .question-index,
+  .page-selection-chip > button:hover {
+    background: var(--line);
+  }
+
+  .tool-activity,
+  .install-pill,
+  .version-pill,
+  .update-reload-glyph {
+    background: var(--surface);
+  }
+
+  .tool-activity.running {
+    background: var(--blue-wash);
+  }
+
+  .tool-summary,
+  .approval-origins code {
+    color: var(--ink);
+  }
+
+  .approval-origins code.unknown {
+    color: var(--danger);
+  }
+
+  .spinner {
+    border-color: var(--line-strong);
+    border-top-color: var(--blue);
+  }
+
+  .row .body.md code {
+    border-color: var(--line);
+    background: var(--canvas-deep);
+  }
+
+  .row .body.md a {
+    text-decoration-color: var(--blue);
+  }
+
+  .row .body.md blockquote,
+  .page-selection-quote,
+  .row .body.md blockquote.page-selection-quote {
+    border-left-color: var(--line-strong);
+  }
+
+  .composer-actions button:disabled {
+    border-color: var(--line);
+    background: var(--canvas-deep);
+    color: var(--faint);
+  }
+
+  .update-card {
+    background: linear-gradient(145deg, var(--surface) 0%, var(--blue-wash) 100%);
+  }
+
+  .install-pill.install-checkout {
+    border-color: #426c58;
+    color: #9bd8b6;
+  }
+
+  .install-pill.install-unknown,
+  .update-reload-reminder,
+  .update-reload-glyph {
+    border-color: var(--security-border);
+  }
+
+  .update-reload-reminder,
+  .approval-actions .session-trust:hover,
+  .approval-actions .read-always:hover {
+    background: var(--security-soft);
+  }
+
+  .setting-toggle-control {
+    border-color: var(--line-strong);
+    background: var(--line);
+  }
+
+  .setting-toggle-input:checked + .setting-toggle-control {
+    border-color: var(--blue);
+    background: var(--blue);
+  }
+}
