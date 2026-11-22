@@ -153,6 +153,8 @@ function isProvisionalFailure(cause: unknown): boolean {
   return errorCodeOf(cause) === 'provisional-session'
 }
 
+const PROJECT_URL = 'https://github.com/Lum1104/dsh-browser'
+
 /** One editable API-relay profile in the settings view. */
 interface RelayProfileDraft {
   /** Stable llm-pi-ai provider-route key; empty until first save mints it. */
@@ -327,6 +329,14 @@ function SettingsIcon(): React.JSX.Element {
     <svg viewBox="0 0 20 20" aria-hidden="true">
       <path d="M10 7.35A2.65 2.65 0 1 0 10 12.65 2.65 2.65 0 0 0 10 7.35Z" />
       <path d="M16.15 11.2a6.4 6.4 0 0 0 0-2.4l1.18-.91-1.5-2.6-1.4.57a6.3 6.3 0 0 0-2.08-1.2L12.15 3h-3l-.2 1.66a6.3 6.3 0 0 0-2.08 1.2l-1.4-.57-1.5 2.6 1.18.91a6.4 6.4 0 0 0 0 2.4l-1.18.91 1.5 2.6 1.4-.57a6.3 6.3 0 0 0 2.08 1.2l.2 1.66h3l.2-1.66a6.3 6.3 0 0 0 2.08-1.2l1.4.57 1.5-2.6-1.18-.91Z" />
+    </svg>
+  )
+}
+
+function StarIcon(): React.JSX.Element {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path d="m10 3.2 2.1 4.3 4.7.7-3.4 3.3.8 4.7L10 13.9l-4.2 2.3.8-4.7-3.4-3.3 4.7-.7L10 3.2Z" />
     </svg>
   )
 }
@@ -2898,6 +2908,10 @@ export function App(): React.JSX.Element {
             aria-label={copy.app.newSession} title={copy.app.newSession}>
             <PlusIcon />
           </button>
+          <a className="icon-button star-trigger" href={PROJECT_URL} target="_blank" rel="noreferrer noopener"
+            aria-label={copy.app.starProject} title={copy.app.starProject}>
+            <StarIcon />
+          </a>
           <button className="icon-button text-size-trigger" onClick={() => setShowTextSize((open) => !open)}
             aria-expanded={showTextSize} aria-label={copy.textSize.open} title={copy.textSize.open}>
             <TextSizeIcon />

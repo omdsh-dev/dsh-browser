@@ -526,6 +526,10 @@ textarea:focus-visible {
   background: transparent;
 }
 
+.star-trigger:hover {
+  color: #d9a21b;
+}
+
 .topbar-actions {
   display: flex;
   align-items: center;

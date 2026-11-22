@@ -194,6 +194,7 @@ export interface PanelCopy {
     value: (percent: string) => string
   }
   app: {
+    starProject: string
     openSettings: string
     settings: string
     openSessions: string
@@ -504,6 +505,7 @@ const EN: PanelCopy = {
     value: (percent) => `Text size ${percent}`,
   },
   app: {
+    starProject: 'Enjoying dsh-browser? Star it on GitHub',
     openSettings: 'Open settings',
     settings: 'Settings',
     openSessions: 'Session history',
@@ -816,6 +818,7 @@ const ZH: PanelCopy = {
     value: (percent) => `字号 ${percent}`,
   },
   app: {
+    starProject: '喜欢 dsh-browser？去 GitHub 点个 Star',
     openSettings: '打开设置',
     settings: '设置',
     openSessions: '历史会话',
