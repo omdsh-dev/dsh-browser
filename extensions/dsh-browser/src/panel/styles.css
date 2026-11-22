@@ -28,6 +28,11 @@
   --security-soft: #fffaeb;
   --security-border: #fedf89;
   --shadow: 0 10px 28px rgba(23, 32, 51, 0.08), 0 2px 6px rgba(23, 32, 51, 0.04);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --shadow-pop: 0 8px 24px rgba(23, 32, 51, 0.12), 0 1px 3px rgba(23, 32, 51, 0.06);
+  --shadow-modal: 0 20px 48px rgba(16, 24, 40, 0.2), 0 2px 8px rgba(16, 24, 40, 0.08);
   --focus-ring: 0 0 0 3px rgba(77, 107, 254, 0.18);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: calc(14px * var(--ui-scale));
@@ -124,11 +129,12 @@ textarea:focus-visible {
   flex: 0 0 auto;
   margin: 10px 12px 0;
   overflow: hidden;
-  padding: 12px 13px 12px 16px;
-  border: 1px solid #eadbbd;
-  border-radius: 13px;
-  background: #fffdf8;
-  box-shadow: 0 1px 2px rgba(23, 32, 51, 0.05);
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  animation: pop-in 0.16s ease-out;
 }
 
 .tab-affinity::before {
@@ -137,11 +143,12 @@ textarea:focus-visible {
   width: 3px;
   background: var(--warning);
   content: "";
+  display: none;
 }
 
 .tab-affinity.background {
-  border-color: #dce3ff;
-  background: #f9faff;
+  border-color: var(--line);
+  background: var(--surface);
 }
 
 .tab-affinity.background::before {
@@ -149,8 +156,8 @@ textarea:focus-visible {
 }
 
 .tab-affinity.lost {
-  border-color: #f3d0cc;
-  background: #fffafa;
+  border-color: var(--danger-border);
+  background: var(--surface);
 }
 
 .tab-affinity.lost::before {
@@ -166,6 +173,7 @@ textarea:focus-visible {
 }
 
 .tab-affinity-heading .eyebrow {
+  display: none;
   color: var(--security);
   font-size: calc(8.5px * var(--ui-scale));
   letter-spacing: 0.1em;
@@ -283,9 +291,10 @@ textarea:focus-visible {
 }
 
 .tab-affinity-actions button {
-  min-height: 32px;
+  min-height: 28px;
   flex: 1 1 0;
-  padding: 6px 11px;
+  padding: 4px 8px;
+  white-space: nowrap;
   border-radius: 8px;
   cursor: pointer;
   font-size: calc(10.5px * var(--ui-scale));
@@ -303,27 +312,6 @@ textarea:focus-visible {
   color: var(--ink);
 }
 
-/* Navigating the user's own tab is its own decision, so it owns a full-width
-   row above the two binding answers instead of competing with them. */
-.tab-affinity-actions .return {
-  flex: 1 0 100%;
-  border: 1px solid var(--blue);
-  background: var(--surface);
-  color: var(--blue);
-}
-
-.tab-affinity-actions .return:hover {
-  background: #f2f5ff;
-}
-
-.tab-affinity-actions .return:disabled {
-  border-color: var(--line-strong);
-  background: var(--surface);
-  color: var(--muted);
-  cursor: default;
-  transform: none;
-}
-
 .tab-affinity-actions .keep:hover {
   border-color: #b6c0d0;
   background: #f8fafc;
@@ -338,21 +326,6 @@ textarea:focus-visible {
 .tab-affinity-actions .follow:hover {
   border-color: var(--blue-hover);
   background: var(--blue-hover);
-}
-
-/* The pin controls ("stay and stop asking" / "ask on tab switch") take their
-   own full-width row so the primary answers above keep equal weight. */
-.tab-affinity-actions .keep-always {
-  flex: 1 0 100%;
-  border: 1px dashed var(--line-strong);
-  background: transparent;
-  color: var(--muted);
-}
-
-.tab-affinity-actions .keep-always:hover {
-  border-color: #b6c0d0;
-  background: var(--surface);
-  color: var(--ink);
 }
 
 .tab-affinity.background .tab-affinity-actions {
@@ -1722,7 +1695,9 @@ textarea:focus-visible {
   border: 1px solid var(--line-strong);
   border-radius: 12px;
   background: var(--surface);
-  box-shadow: 0 14px 34px rgb(15 23 42 / 18%);
+  border-color: var(--line);
+  box-shadow: var(--shadow-pop);
+  animation: pop-in 0.12s ease-out;
 }
 
 .composer-chip-menu button {
@@ -1797,7 +1772,9 @@ textarea:focus-visible {
   border: 1px solid var(--line-strong);
   border-radius: 12px;
   background: var(--surface);
-  box-shadow: 0 14px 34px rgb(15 23 42 / 18%);
+  border-color: var(--line);
+  box-shadow: var(--shadow-pop);
+  animation: pop-in 0.12s ease-out;
   overscroll-behavior: contain;
 }
 
@@ -1903,7 +1880,8 @@ textarea:focus-visible {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--surface);
-  box-shadow: 0 10px 28px rgba(18, 28, 56, 0.12);
+  box-shadow: var(--shadow-pop);
+  animation: pop-in 0.12s ease-out;
 }
 
 .composer-model-group + .composer-model-group {
@@ -2129,14 +2107,24 @@ textarea:focus-visible {
   border: 1px solid var(--line);
   border-radius: 16px;
   background: var(--surface);
-  box-shadow: 0 6px 18px rgba(23, 32, 51, 0.05);
+  box-shadow: none;
+}
+
+.uninstall-card {
+  background: transparent;
 }
 
 .uninstall-card summary {
-  padding: 14px;
+  padding: 12px 14px;
   cursor: pointer;
+  color: var(--muted);
+  font-size: calc(12px * var(--ui-scale));
+  font-weight: 600;
+}
+
+.uninstall-card summary:hover,
+.uninstall-card[open] summary {
   color: var(--danger);
-  font-weight: 650;
 }
 
 .uninstall-content {
@@ -2169,10 +2157,10 @@ textarea:focus-visible {
   flex-direction: column;
   gap: 12px;
   padding: 14px;
-  border: 1px solid #d5ddfb;
+  border: 1px solid var(--line);
   border-radius: 16px;
-  background: linear-gradient(145deg, #ffffff 0%, var(--blue-wash) 100%);
-  box-shadow: 0 7px 20px rgba(41, 69, 199, 0.07);
+  background: var(--surface);
+  box-shadow: none;
 }
 
 .update-card::before {
@@ -2831,8 +2819,8 @@ textarea:focus-visible {
   display: grid;
   padding: 16px;
   place-items: center;
-  background: rgba(16, 24, 40, 0.48);
-  backdrop-filter: blur(4px);
+  background: rgba(16, 24, 40, 0.4);
+  animation: fade-in 0.16s ease-out;
 }
 
 .approval-dialog {
@@ -2840,10 +2828,11 @@ textarea:focus-visible {
   width: min(100%, 380px);
   overflow: hidden;
   padding: 18px;
-  border: 1px solid var(--security-border);
-  border-radius: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
   background: var(--surface);
-  box-shadow: 0 24px 64px rgba(16, 24, 40, 0.24), 0 4px 12px rgba(16, 24, 40, 0.12);
+  box-shadow: var(--shadow-modal);
+  animation: pop-in 0.16s ease-out;
 }
 
 .approval-rail {
@@ -2851,8 +2840,7 @@ textarea:focus-visible {
   top: 0;
   right: 0;
   left: 0;
-  height: 5px;
-  background: repeating-linear-gradient(135deg, #fdb022 0 8px, #1d2939 8px 16px);
+  display: none;
 }
 
 .approval-heading {
@@ -3094,7 +3082,8 @@ textarea:focus-visible {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 12px;
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-pop);
+  animation: pop-in 0.12s ease-out;
 }
 
 .session-picker-head {
@@ -3513,4 +3502,32 @@ textarea:focus-visible {
   background: var(--surface);
   color: var(--ink);
   cursor: pointer;
+}
+
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Small-caps eyebrow labels read as decoration; titles carry the meaning. */
+.settings .eyebrow,
+.approval-heading .eyebrow {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab-affinity,
+  .composer-chip-menu,
+  .slash-menu,
+  .composer-model-menu,
+  .session-picker,
+  .approval-dialog,
+  .approval-backdrop {
+    animation: none;
+  }
 }

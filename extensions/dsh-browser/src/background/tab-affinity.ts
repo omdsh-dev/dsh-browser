@@ -60,6 +60,8 @@ export class TabAffinityController {
   private active: AffinityTab | null = null
   private keptActiveTabId: number | null = null
   private pinned = false
+  /** Global preference: never raise the per-switch handoff prompt. */
+  private alwaysStay = false
   private hasBound = false
   private lost = false
   private revision = 0
@@ -276,6 +278,15 @@ export class TabAffinityController {
     return true
   }
 
+  /** Apply the "ask on tab switch" preference; returns whether visible state changed. */
+  setAlwaysStay(value: boolean): boolean {
+    if (this.alwaysStay === value) return false
+    this.alwaysStay = value
+    this.keptActiveTabId = null
+    this.revision += 1
+    return true
+  }
+
   /** Rehydrate the fail-closed state when the prior controlled tab was lost. */
   restoreLost(): boolean {
     if (this.controlled !== null || this.hasBound || this.lost) return false
@@ -421,7 +432,7 @@ export class TabAffinityController {
   private status(): TabAffinityStatus {
     if (this.controlled === null) return this.lost ? 'lost' : 'unbound'
     if (this.active?.tabId === this.controlled.tabId) return 'following'
-    if (this.active !== null && !this.pinned && this.keptActiveTabId !== this.active.tabId) return 'handoff'
+    if (this.active !== null && !this.pinned && !this.alwaysStay && this.keptActiveTabId !== this.active.tabId) return 'handoff'
     return 'background'
   }
 

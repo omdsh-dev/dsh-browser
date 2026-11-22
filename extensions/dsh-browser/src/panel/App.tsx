@@ -35,7 +35,6 @@ import {
   stepUiScale,
   uiScaleAtLimit,
 } from './ui-scale.ts'
-import { canReturnToControlledTab } from './tab-handoff.ts'
 import { QuestionCard } from './QuestionCard.tsx'
 import { UpdateCard } from './UpdateCard.tsx'
 import { UninstallCard } from './UninstallCard.tsx'
@@ -485,14 +484,10 @@ function TabAffinityBanner({
   state,
   copy,
   onDecision,
-  onReturn,
-  returnPending,
 }: {
   state: TabAffinityState | null
   copy: PanelCopy
   onDecision: (decision: TabAffinityDecision) => void
-  onReturn: () => void
-  returnPending: boolean
 }): React.JSX.Element | null {
   if (state === null || state.status === 'unbound' || state.status === 'following') return null
   const controlled = tabLabel(state.controlled, copy.tabHandoff.closedTab)
@@ -529,33 +524,12 @@ function TabAffinityBanner({
           <span title={active}>{active}</span>
         </span>
       </div>
-      <p>{body}</p>
+      {!handoff && <p>{body}</p>}
       <div className="tab-affinity-actions">
-        {canReturnToControlledTab(state) && (
-          <button
-            type="button"
-            className="return"
-            onClick={onReturn}
-            disabled={returnPending}
-            aria-busy={returnPending}
-          >
-            {copy.tabHandoff.returnToAssistant}
-          </button>
-        )}
         {handoff && <button className="keep" onClick={() => onDecision('keep')}>{copy.tabHandoff.keep}</button>}
         {state.active !== null && (
           <button className="follow" onClick={() => onDecision('follow')}>
             {lost ? copy.tabHandoff.useCurrent : handoff ? copy.tabHandoff.follow : copy.tabHandoff.followCurrent}
-          </button>
-        )}
-        {handoff && (
-          <button className="keep-always" onClick={() => onDecision('keep-always')}>
-            {copy.tabHandoff.keepAlways}
-          </button>
-        )}
-        {!handoff && !lost && state.pinned && (
-          <button className="keep-always" onClick={() => onDecision('ask-again')}>
-            {copy.tabHandoff.askAgain}
           </button>
         )}
       </div>
@@ -787,7 +761,6 @@ export function App(): React.JSX.Element {
   const uiScaleChosenRef = useRef(false)
   const [approvalQueue, setApprovalQueue] = useState<ApprovalRequest[]>([])
   const [tabAffinity, setTabAffinity] = useState<TabAffinityState | null>(null)
-  const [tabAffinityReturnPending, setTabAffinityReturnPending] = useState(false)
   const [trustedOriginInput, setTrustedOriginInput] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [showSessionPicker, setShowSessionPicker] = useState(false)
@@ -975,6 +948,7 @@ export function App(): React.JSX.Element {
         trustedActionOrigins: raw?.trustedActionOrigins ?? [],
         approvalNotifications: raw?.approvalNotifications ?? true,
         autoResumeSession: raw?.autoResumeSession ?? true,
+        askOnTabSwitch: raw?.askOnTabSwitch ?? true,
       })
     })
   }, [])
@@ -2440,25 +2414,6 @@ export function App(): React.JSX.Element {
     }
   }
 
-  /**
-   * Ask the background to move this browser's visible tab back to the page the
-   * assistant is bound to. A stale revision means the user already switched
-   * again; the fresh state is on its way, so that case stays silent.
-   */
-  async function returnToControlledTab(): Promise<void> {
-    if (tabAffinity === null || tabAffinityReturnPending) return
-    setTabAffinityReturnPending(true)
-    try {
-      await api.returnToControlledTab(tabAffinity.revision)
-    } catch (cause) {
-      if (!(cause instanceof PanelRpcError && cause.code === 'stale-revision')) {
-        setError(cause instanceof Error ? cause.message : String(cause))
-      }
-    } finally {
-      setTabAffinityReturnPending(false)
-    }
-  }
-
   function addTrustedOrigin(): void {
     const origin = normalizeWebOrigin(trustedOriginInput)
     if (origin === null) return
@@ -2762,6 +2717,21 @@ export function App(): React.JSX.Element {
             />
             <span className="setting-toggle-control" aria-hidden="true"><span /></span>
           </label>
+          <label className="setting-toggle">
+            <span className="setting-toggle-copy">
+              <strong>{copy.settings.askOnTabSwitch}</strong>
+              <small>{copy.settings.askOnTabSwitchHelp}</small>
+            </span>
+            <input
+              className="setting-toggle-input"
+              type="checkbox"
+              checked={settings?.askOnTabSwitch ?? true}
+              onChange={(event) => setSettings((current) => current === null
+                ? current
+                : { ...current, askOnTabSwitch: event.target.checked })}
+            />
+            <span className="setting-toggle-control" aria-hidden="true"><span /></span>
+          </label>
         </div>
         <section className="relay-config" aria-labelledby="relay-title">
           <div className="relay-heading">
@@ -2925,8 +2895,6 @@ export function App(): React.JSX.Element {
         state={tabAffinity}
         copy={copy}
         onDecision={decideTabAffinity}
-        onReturn={returnToControlledTab}
-        returnPending={tabAffinityReturnPending}
       />
       {showSessionPicker && (
         <section className="session-picker" aria-label={copy.app.sessions}>

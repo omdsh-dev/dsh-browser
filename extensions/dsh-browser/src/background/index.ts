@@ -117,6 +117,8 @@ export interface Settings {
   approvalNotifications: boolean
   /** Restore the current tab and page path's conversation when the panel reopens. */
   autoResumeSession: boolean
+  /** Ask which page the assistant should use when the user switches tabs. */
+  askOnTabSwitch: boolean
 }
 
 const SETTINGS_DEFAULTS: Settings = {
@@ -129,6 +131,7 @@ const SETTINGS_DEFAULTS: Settings = {
   trustedActionOrigins: [],
   approvalNotifications: true,
   autoResumeSession: true,
+  askOnTabSwitch: true,
 }
 
 /**
@@ -442,6 +445,7 @@ async function persistSettings(next: Partial<Settings>): Promise<void> {
   const changesDevTools = typeof next.allowDevTools === 'boolean'
   const revokesDevTools = changesDevTools && (settings.allowDevTools || sessionDevToolsGrant) && !updated.allowDevTools
   settings = updated
+  if (tabAffinity.setAlwaysStay(!updated.askOnTabSwitch)) broadcastTabAffinity()
   if (!updated.unrestrictedBrowserAccess) unrestrictedAccessActive = false
   if (revokesDevTools) sessionDevToolsGrant = false
   syncSelectionWatch()
@@ -507,6 +511,7 @@ function normalizeSettings(candidate: Settings): Settings {
     trustedActionOrigins: trusted,
     approvalNotifications: candidate.approvalNotifications !== false,
     autoResumeSession: candidate.autoResumeSession !== false,
+    askOnTabSwitch: candidate.askOnTabSwitch !== false,
   }
 }
 
@@ -521,6 +526,7 @@ let settingsLoaded = false
 const settingsReady = loadSettings().then((loaded) => {
   settings = loaded
   unrestrictedAccessActive = loaded.unrestrictedBrowserAccess
+  tabAffinity.setAlwaysStay(!loaded.askOnTabSwitch)
   settingsLoaded = true
 })
 

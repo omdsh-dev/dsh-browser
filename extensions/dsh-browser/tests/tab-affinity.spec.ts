@@ -53,6 +53,23 @@ describe('TabAffinityController', () => {
     expect(affinity.snapshot().status).toBe('handoff')
   })
 
+  it('never prompts while the ask-on-tab-switch preference is off', () => {
+    const affinity = new TabAffinityController()
+    affinity.observeActive(tab(1))
+    affinity.bindInitial(tab(1))
+    affinity.observeActive(tab(2))
+    expect(affinity.snapshot().status).toBe('handoff')
+
+    expect(affinity.setAlwaysStay(true)).toBe(true)
+    expect(affinity.setAlwaysStay(true)).toBe(false)
+    expect(affinity.snapshot()).toMatchObject({ status: 'background', controlled: { tabId: 1 } })
+    affinity.observeActive(tab(3))
+    expect(affinity.resolveTarget()).toMatchObject({ kind: 'target', tab: { tabId: 1 } })
+
+    affinity.setAlwaysStay(false)
+    expect(affinity.snapshot().status).toBe('handoff')
+  })
+
   it('stops prompting on later tab switches after keep-always', () => {
     const affinity = new TabAffinityController()
     affinity.observeActive(tab(1))

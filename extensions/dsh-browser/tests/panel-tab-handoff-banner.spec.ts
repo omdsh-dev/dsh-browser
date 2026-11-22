@@ -112,7 +112,7 @@ describe('tab handoff banner', () => {
       .map((button) => button.textContent ?? '')
   }
 
-  it('offers jumping back to the assistant page first, then the two binding answers', async () => {
+  it('offers only the two binding answers', async () => {
     await renderConnected()
 
     await pushAffinity({
@@ -123,12 +123,7 @@ describe('tab handoff banner', () => {
       pinned: false,
     })
 
-    expect(actionLabels()).toEqual([
-      'Jump back to the assistant page',
-      'Assistant stays on the original page',
-      'Assistant follows the current page',
-      'Assistant stays & stop asking',
-    ])
+    expect(actionLabels()).toEqual(['Stay', 'Follow'])
   })
 
   it('sends the choice against the revision it was shown for', async () => {
@@ -141,14 +136,14 @@ describe('tab handoff banner', () => {
       pinned: false,
     })
 
-    const jumpBack = document.querySelector<HTMLButtonElement>('.tab-affinity-actions .return')!
-    await act(async () => { jumpBack.click() })
+    const stay = document.querySelector<HTMLButtonElement>('.tab-affinity-actions .keep')!
+    await act(async () => { stay.click() })
 
-    await vi.waitFor(() => { expect(panelApi.returnToControlledTab).toHaveBeenCalledTimes(1) })
-    expect(vi.mocked(panelApi.returnToControlledTab).mock.calls[0]?.[0]).toBe(3)
+    await vi.waitFor(() => { expect(panelApi.resolveTabAffinity).toHaveBeenCalledTimes(1) })
+    expect(vi.mocked(panelApi.resolveTabAffinity).mock.calls[0]?.slice(0, 2)).toEqual([3, 'keep'])
   })
 
-  it('drops the jump-back answer once the user has already chosen', async () => {
+  it('offers only to follow once the user has already chosen', async () => {
     await renderConnected()
 
     await pushAffinity({
@@ -159,7 +154,6 @@ describe('tab handoff banner', () => {
       pinned: false,
     })
 
-    expect(document.querySelector('.tab-affinity-actions .return')).toBeNull()
     // The background banner keeps its own wording: it offers to follow, not to answer.
     expect(actionLabels()).toEqual(['Follow the current page'])
   })
