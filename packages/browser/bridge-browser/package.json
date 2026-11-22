@@ -131,6 +131,6 @@
     "playwright-core": "^1.61.1",
     "tsdown": "0.22.2",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   }
 }
