@@ -193,7 +193,8 @@ export interface PanelCopy {
     value: (percent: string) => string
   }
   app: {
-    starProject: string
+    starBanner: string
+    starBannerAction: string
     openSettings: string
     settings: string
     openSessions: string
@@ -205,10 +206,6 @@ export interface PanelCopy {
     deleteSessionConfirm: (title: string) => string
     deleteSessionFailed: (reason: string) => string
     deletePurgeFailed: (reason: string) => string
-    emptyTitle: string
-    emptyDescription: string
-    overviewPage: string
-    overviewPrompt: string
     assistant: string
     assistantWorking: string
     organizingResults: string
@@ -503,7 +500,8 @@ const EN: PanelCopy = {
     value: (percent) => `Text size ${percent}`,
   },
   app: {
-    starProject: 'Enjoying dsh-browser? Star it on GitHub',
+    starBanner: 'Find it useful?',
+    starBannerAction: 'Star it on GitHub →',
     openSettings: 'Open settings',
     settings: 'Settings',
     openSessions: 'Session history',
@@ -515,10 +513,6 @@ const EN: PanelCopy = {
     deleteSessionConfirm: (title) => `Delete “${title}”? Its conversation history will be removed permanently.`,
     deleteSessionFailed: (reason) => `Delete failed: ${reason}`,
     deletePurgeFailed: (reason) => `Removed from the list, but file cleanup failed (it may reappear after dsh restarts): ${reason}`,
-    emptyTitle: 'Hand me the current page',
-    emptyDescription: 'I can read the page, find information, and click, fill, or navigate for you.',
-    overviewPage: 'Give me an overview',
-    overviewPrompt: 'First give me an overview of the current page, tell me the most important information, and wait for my next instruction.',
     assistant: 'Assistant',
     assistantWorking: 'Assistant is working',
     organizingResults: 'Organizing results',
@@ -815,7 +809,8 @@ const ZH: PanelCopy = {
     value: (percent) => `字号 ${percent}`,
   },
   app: {
-    starProject: '喜欢 dsh-browser？去 GitHub 点个 Star',
+    starBanner: '觉得好用？',
+    starBannerAction: '去 GitHub 点个 Star →',
     openSettings: '打开设置',
     settings: '设置',
     openSessions: '历史会话',
@@ -827,10 +822,6 @@ const ZH: PanelCopy = {
     deleteSessionConfirm: (title) => `确定删除「${title}」吗？对话历史将被永久移除。`,
     deleteSessionFailed: (reason) => `删除失败：${reason}`,
     deletePurgeFailed: (reason) => `已从列表移除，但文件清理失败（dsh 重启后可能再次出现）：${reason}`,
-    emptyTitle: '把当前页面交给我',
-    emptyDescription: '我可以阅读页面、查找信息，也可以替你点击、填写和导航。',
-    overviewPage: '先概览这个页面',
-    overviewPrompt: '请先概览当前页面，告诉我最重要的信息，并等待我的下一步指令。',
     assistant: '助手',
     assistantWorking: '助手正在处理',
     organizingResults: '正在整理结果',

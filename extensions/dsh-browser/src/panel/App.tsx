@@ -333,11 +333,24 @@ function SettingsIcon(): React.JSX.Element {
   )
 }
 
-function StarIcon(): React.JSX.Element {
+const WHALE_DANCES = ['spin', 'hop', 'sway', 'wiggle'] as const
+
+/** Empty-state mascot: hovering or clicking it (or the padding around it) plays a random dance. */
+function DancingWhale(): React.JSX.Element {
+  const [dance, setDance] = useState<string | null>(null)
+  const lastDance = useRef<string | null>(null)
+  const start = (): void => {
+    if (dance !== null) return
+    const choices = WHALE_DANCES.filter((name) => name !== lastDance.current)
+    const next = choices[Math.floor(Math.random() * choices.length)]
+    lastDance.current = next
+    setDance(next)
+  }
   return (
-    <svg viewBox="0 0 20 20" aria-hidden="true">
-      <path d="m10 3.2 2.1 4.3 4.7.7-3.4 3.3.8 4.7L10 13.9l-4.2 2.3.8-4.7-3.4-3.3 4.7-.7L10 3.2Z" />
-    </svg>
+    <span className="empty-logo" onMouseEnter={start} onClick={start}>
+      <img src={whaleUrl} alt="" className={dance === null ? undefined : `dance-${dance}`}
+        onAnimationEnd={() => setDance(null)} />
+    </span>
   )
 }
 
@@ -2901,10 +2914,6 @@ export function App(): React.JSX.Element {
             aria-label={copy.app.newSession} title={copy.app.newSession}>
             <PlusIcon />
           </button>
-          <a className="icon-button star-trigger" href={PROJECT_URL} target="_blank" rel="noreferrer noopener"
-            aria-label={copy.app.starProject} title={copy.app.starProject}>
-            <StarIcon />
-          </a>
           <button className="icon-button settings-trigger" onClick={() => {
             setShowModelPicker(false)
             setShowSettings(true)
@@ -2963,19 +2972,15 @@ export function App(): React.JSX.Element {
       )}
       <div className="messages-pane">
       <div className="messages" ref={scrollRef} onScroll={syncScrollBottom}>
-        {rows.length === 0 && streamRow === null && !working && (
-          <div className="empty">
-            <span className="empty-logo"><img src={whaleUrl} alt="" /></span>
-            <div>
-              <h1>{copy.app.emptyTitle}</h1>
-              <p>{copy.app.emptyDescription}</p>
-            </div>
-            <button disabled={!sessionReady}
-              onClick={() => { void send(copy.app.overviewPrompt) }}>
-              {copy.app.overviewPage}
-            </button>
+        {rows.length === 0 && streamRow === null && !working && (<>
+          <div className="star-banner">
+            <span>{copy.app.starBanner}</span>
+            <a href={PROJECT_URL} target="_blank" rel="noreferrer noopener">{copy.app.starBannerAction}</a>
           </div>
-        )}
+          <div className="empty">
+            <DancingWhale />
+          </div>
+        </>)}
         {rows.map((row) => (
           <div key={row.seq} className={`row ${row.kind}`}>
             {row.kind === 'assistant' && <span className="assistant-avatar"><img src={whaleUrl} alt={copy.app.assistant} /></span>}

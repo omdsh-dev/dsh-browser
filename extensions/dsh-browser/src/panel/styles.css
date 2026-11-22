@@ -526,8 +526,22 @@ textarea:focus-visible {
   background: transparent;
 }
 
-.star-trigger:hover {
-  color: #d9a21b;
+.star-banner {
+  flex: 0 0 auto;
+  padding: 12px 16px 0;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.star-banner a {
+  margin-left: 4px;
+  color: var(--blue);
+  text-decoration: none;
+}
+
+.star-banner a:hover {
+  text-decoration: underline;
 }
 
 .topbar-actions {
@@ -642,63 +656,62 @@ textarea:focus-visible {
 }
 
 .empty-logo {
-  display: grid;
-  width: 58px;
-  height: 58px;
-  place-items: center;
-  border: 1px solid #d7dfff;
-  border-radius: 19px;
-  background: var(--blue-soft);
-  box-shadow: 0 10px 26px rgba(77, 107, 254, 0.13);
+  display: block;
+  /* Padding widens the hover zone; the negative margin keeps the layout unchanged. */
+  margin: -22px;
+  padding: 22px;
+  cursor: pointer;
 }
 
 .empty-logo img {
-  width: 42px;
-  height: 42px;
+  display: block;
+  width: 64px;
+  height: 64px;
   object-fit: contain;
 }
 
-.empty h1 {
-  margin: 0 0 7px;
-  color: var(--ink-strong);
-  font-family: "Avenir Next", "Segoe UI Variable Display", "PingFang SC", sans-serif;
-  font-size: calc(20px * var(--ui-scale));
-  font-weight: 720;
-  letter-spacing: -0.035em;
-  line-height: 1.25;
+.empty-logo img[class^="dance-"] {
+  animation-duration: 0.9s;
+  animation-timing-function: ease-in-out;
 }
 
-.empty p {
-  margin: 0;
-  color: var(--muted);
-  font-size: calc(12px * var(--ui-scale));
-  line-height: 1.65;
+.dance-spin { animation-name: whale-spin; }
+.dance-hop { animation-name: whale-hop; }
+.dance-sway { animation-name: whale-sway; }
+.dance-wiggle { animation-name: whale-wiggle; animation-duration: 0.7s; }
+
+@keyframes whale-spin {
+  from { transform: rotate(0) scale(1); }
+  50% { transform: rotate(180deg) scale(1.15); }
+  to { transform: rotate(360deg) scale(1); }
 }
 
-.empty button {
-  min-height: 36px;
-  padding: 8px 14px;
-  border: 1px solid #ced8ff;
-  border-radius: 11px;
-  background: var(--surface);
-  color: var(--blue-ink);
-  cursor: pointer;
-  font-size: calc(11.5px * var(--ui-scale));
-  font-weight: 680;
-  box-shadow: 0 4px 12px rgba(23, 32, 51, 0.05);
-  transition: border-color 150ms ease, background-color 150ms ease, transform 150ms ease;
+@keyframes whale-hop {
+  0%, 100% { transform: translateY(0) scale(1, 1); }
+  15% { transform: translateY(0) scale(1.1, 0.88); }
+  35% { transform: translateY(-20px) scale(0.95, 1.08); }
+  55% { transform: translateY(0) scale(1.08, 0.92); }
+  70% { transform: translateY(-11px) scale(0.97, 1.04); }
+  85% { transform: translateY(0) scale(1.04, 0.96); }
 }
 
-.empty button:hover:not(:disabled) {
-  border-color: #aebeff;
-  background: var(--blue-wash);
-  transform: translateY(-1px);
+@keyframes whale-sway {
+  0%, 100% { transform: translateX(0) rotate(0); }
+  25% { transform: translateX(-16px) rotate(-12deg); }
+  50% { transform: translateX(0) rotate(0); }
+  75% { transform: translateX(16px) rotate(12deg); }
 }
 
-.empty button:disabled {
-  border-color: var(--line);
-  color: var(--faint);
-  cursor: default;
+@keyframes whale-wiggle {
+  0%, 100% { transform: rotate(0); }
+  20% { transform: rotate(-16deg) scale(1.08); }
+  40% { transform: rotate(14deg) scale(1.08); }
+  60% { transform: rotate(-10deg); }
+  80% { transform: rotate(8deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .empty-logo img[class^="dance-"] { animation: none; }
 }
 
 .row {
