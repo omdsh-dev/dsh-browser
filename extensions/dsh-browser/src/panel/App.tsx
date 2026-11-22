@@ -405,15 +405,6 @@ function BackIcon(): React.JSX.Element {
   )
 }
 
-function TextSizeIcon(): React.JSX.Element {
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true">
-      <path d="M2.5 14.5 6.25 5h1.5l3.75 9.5M4.1 11.4h5.8" />
-      <path d="M12.4 14.5 15 7.6h1.1l2.6 6.9M13.5 12.4h4.1" />
-    </svg>
-  )
-}
-
 function MinusIcon(): React.JSX.Element {
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true">
@@ -781,7 +772,6 @@ export function App(): React.JSX.Element {
   const [uiScale, setUiScale] = useState(DEFAULT_UI_SCALE)
   const uiScaleRef = useRef(DEFAULT_UI_SCALE)
   const uiScaleChosenRef = useRef(false)
-  const [showTextSize, setShowTextSize] = useState(false)
   const [approvalQueue, setApprovalQueue] = useState<ApprovalRequest[]>([])
   const [tabAffinity, setTabAffinity] = useState<TabAffinityState | null>(null)
   const [tabAffinityReturnPending, setTabAffinityReturnPending] = useState(false)
@@ -2602,6 +2592,9 @@ export function App(): React.JSX.Element {
             </select>
           </label>
         </div>
+        <TextSizePanel scale={uiScale} copy={copy}
+          onStep={(direction) => changeUiScale(stepUiScale(uiScaleRef.current, direction))}
+          onReset={() => changeUiScale(DEFAULT_UI_SCALE)} />
         <div className="settings-panel">
           <label>
             <span>{copy.settings.bridgeAddress}</span>
@@ -2912,10 +2905,6 @@ export function App(): React.JSX.Element {
             aria-label={copy.app.starProject} title={copy.app.starProject}>
             <StarIcon />
           </a>
-          <button className="icon-button text-size-trigger" onClick={() => setShowTextSize((open) => !open)}
-            aria-expanded={showTextSize} aria-label={copy.textSize.open} title={copy.textSize.open}>
-            <TextSizeIcon />
-          </button>
           <button className="icon-button settings-trigger" onClick={() => {
             setShowModelPicker(false)
             setShowSettings(true)
@@ -2923,11 +2912,6 @@ export function App(): React.JSX.Element {
             aria-label={copy.app.openSettings} title={copy.app.settings}><SettingsIcon /></button>
         </div>
       </header>
-      {showTextSize && (
-        <TextSizePanel scale={uiScale} copy={copy}
-          onStep={(direction) => changeUiScale(stepUiScale(uiScaleRef.current, direction))}
-          onReset={() => changeUiScale(DEFAULT_UI_SCALE)} />
-      )}
       <TabAffinityBanner
         state={tabAffinity}
         copy={copy}

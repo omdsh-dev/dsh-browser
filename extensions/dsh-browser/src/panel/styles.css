@@ -3076,7 +3076,7 @@ textarea:focus-visible {
   flex: 0 0 auto;
   max-height: 260px;
   overflow-y: auto;
-  margin: 8px 12px 10px;
+  margin: 0;
   padding: 10px 12px;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -3490,12 +3490,6 @@ textarea:focus-visible {
 .text-size-reset:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-}
-
-.text-size-trigger[aria-expanded="true"] {
-  border-color: var(--line);
-  background: var(--canvas);
-  color: var(--ink-strong);
 }
 .continue-generation {
   align-self: flex-start;

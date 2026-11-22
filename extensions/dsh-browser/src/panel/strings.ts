@@ -186,7 +186,6 @@ export interface PanelCopy {
     copyError: string
   }
   textSize: {
-    open: string
     title: string
     smaller: string
     larger: string
@@ -497,7 +496,6 @@ const EN: PanelCopy = {
     copyError: 'Copy failed',
   },
   textSize: {
-    open: 'Text size',
     title: 'Text size',
     smaller: 'Smaller text',
     larger: 'Larger text',
@@ -810,7 +808,6 @@ const ZH: PanelCopy = {
     copyError: '复制失败',
   },
   textSize: {
-    open: '字号',
     title: '字号',
     smaller: '缩小字号',
     larger: '放大字号',
