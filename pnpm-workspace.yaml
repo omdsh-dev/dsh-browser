@@ -3,7 +3,7 @@ packages:
   - extensions/*
   - packages/*/*
 
-# DSH peer providers 由工作区显式提供，统一使用 0.2.2-rc.2。
+# DSH peer providers 由工作区显式提供，统一使用 0.2.2-rc.5。
 autoInstallPeers: false
 
 overrides:
