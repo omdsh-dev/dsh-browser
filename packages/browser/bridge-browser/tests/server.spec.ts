@@ -135,7 +135,11 @@ describe('BridgeServer', () => {
     await waitFor(() => h.bridge.devToolsSupported() === false)
     expect(onCapsChange).toHaveBeenLastCalledWith(CAPS)
     ws.close()
+    // Dropping the last connection retracts the capability and notifies the
+    // host, so a listener can tear down any tools registered for it.
     legacy.close()
+    await waitFor(() => onCapsChange.mock.calls.some(([caps]) => caps === undefined))
+    expect(h.bridge.devToolsSupported()).toBe(false)
   })
 
   it('authenticates a valid hello and acknowledges caps', async () => {

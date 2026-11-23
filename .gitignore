@@ -6,3 +6,8 @@ node_modules/
 **/dist-firefox/
 coverage/
 .artifacts/
+
+package-lock.json
+packages/browser/bridge-browser/package-lock.json
+node_modules/
+packages/*/*/node_modules/
