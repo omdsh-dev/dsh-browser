@@ -93,9 +93,12 @@ export interface BridgeServerDeps {
   caps: BridgeCaps
   /**
    * Called after each accepted `hello`, with the capabilities that connection
-   * advertised. The plugin re-evaluates the developer-tools tool group here.
+   * advertised, and again with `undefined` when the active connection drops
+   * (so the plugin can tear down the developer-tools group it registered for
+   * that connection; a replacement by another `hello` fires the new caps
+   * directly instead).
    */
-  onCapsChange?: (clientCaps: BridgeCaps) => void
+  onCapsChange?: (clientCaps: BridgeCaps | undefined) => void
   /** Seed a followed-page snapshot into a live or deferred Agent session. */
   injectBrowserSnapshot: (sessionId: string, snapshot: string) => void | Promise<void>
   /**
@@ -335,7 +338,14 @@ export class BridgeServer {
     }
     const onClose = (): void => {
       if (helloTimer !== undefined) clearTimeout(helloTimer)
-      if (this.current !== null && this.current.ws === ws) this.replaceConnection()
+      if (this.current !== null && this.current.ws === ws) {
+        this.replaceConnection()
+        // Notify the host that the slot is now empty, so a listener
+        // re-evaluating `devToolsSupported()` (which reads `this.current`)
+        // sees the retraction and can unregister tools it registered for the
+        // connection that just dropped.
+        this.deps.onCapsChange?.(undefined)
+      }
     }
     ws.on('message', onMessage)
     ws.once('close', onClose)

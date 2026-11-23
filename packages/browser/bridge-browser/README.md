@@ -109,7 +109,7 @@ Clicks, text entry, and scrolling run in the selected document, including cross-
 
 ### Developer tools (high privilege)
 
-This group is registered only while the connected extension advertises the `devTools` capability, which Chrome builds do and Firefox builds do not. Each call requires consent through **Allow developer tools** in Settings, a current side-panel session grant, or a per-call approval (allow once / trust this session / deny). Session trust expires when the last panel closes or the worker restarts. The blanket browser-control switch and the persistent origin allowlist do not cover this group.
+This group is registered only while the connected extension advertises the `devTools` capability, which Chrome builds do and Firefox builds do not. The group is (un)registered as connections come and go: a new authenticated connection advertises its capability, and when the last connection drops the host is notified so the group is unregistered again. Each call requires consent through **Allow developer tools** in Settings, a current side-panel session grant, or a per-call approval (allow once / trust this session / deny). Session trust expires when the last panel closes or the worker restarts. The blanket browser-control switch and the persistent origin allowlist do not cover this group.
 
 | Tool | Purpose |
 |---|---|
