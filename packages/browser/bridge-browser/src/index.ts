@@ -140,10 +140,10 @@ export async function apply(ctx: Context, resolved: ResolvedConfig): Promise<voi
   const gateway = ctx.get('typertGateway') as unknown as GatewayCandidate | undefined
   const connection = ctx.get('connection') as unknown as HostConnectionLike | undefined
   if (gateway === undefined || !hasRemoteWireStream(gateway)) {
-    throw new Error('bridge-browser: dsh 0.2.2-rc.2 is required (Gateway wireStream unavailable)')
+    throw new Error('bridge-browser: dsh 0.2.2-rc.5 is required (Gateway wireStream unavailable)')
   }
   if (connection === undefined || typeof connection.createPeer !== 'function') {
-    throw new Error('bridge-browser: dsh 0.2.2-rc.2 is required (connection.createPeer unavailable)')
+    throw new Error('bridge-browser: dsh 0.2.2-rc.5 is required (connection.createPeer unavailable)')
   }
   const tokenRes = await resolveToken(resolved.token)
   mountBridge(ctx, resolved, tokenRes, createRemoteHostApi(gateway, connection))

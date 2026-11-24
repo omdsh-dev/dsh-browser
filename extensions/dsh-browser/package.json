@@ -1,7 +1,7 @@
 {
   "name": "dsh-browser-extension",
   "description": "Chrome and Firefox MV3 extension: sidebar chat and browser tools for a local dsh instance",
-  "version": "0.1.5",
+  "version": "0.1.7",
   "author": "Yuxiang Lin",
   "license": "MIT",
   "private": true,
@@ -15,7 +15,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "dompurify": "^3.4.13",
+    "dompurify": "^3.4.17",
     "marked": "^18.0.9",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -29,7 +29,7 @@
     "@yuxianglin/dsh-bridge-browser": "workspace:^",
     "jsdom": "^26.1.0",
     "typescript": "^5.6.2",
-    "vite": "^6.0.0",
-    "vitest": "^4.1.11"
+    "vite": "^6.4.4",
+    "vitest": "^4.1.12"
   }
 }

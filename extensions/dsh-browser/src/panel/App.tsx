@@ -35,7 +35,6 @@ import {
   stepUiScale,
   uiScaleAtLimit,
 } from './ui-scale.ts'
-import { canReturnToControlledTab } from './tab-handoff.ts'
 import { QuestionCard } from './QuestionCard.tsx'
 import { UpdateCard } from './UpdateCard.tsx'
 import { UninstallCard } from './UninstallCard.tsx'
@@ -152,6 +151,8 @@ function isUnavailableMethod(cause: unknown): boolean {
 function isProvisionalFailure(cause: unknown): boolean {
   return errorCodeOf(cause) === 'provisional-session'
 }
+
+const PROJECT_URL = 'https://github.com/Lum1104/dsh-browser'
 
 /** One editable API-relay profile in the settings view. */
 interface RelayProfileDraft {
@@ -331,6 +332,27 @@ function SettingsIcon(): React.JSX.Element {
   )
 }
 
+const WHALE_DANCES = ['spin', 'hop', 'sway', 'wiggle'] as const
+
+/** Empty-state mascot: hovering or clicking it (or the padding around it) plays a random dance. */
+function DancingWhale(): React.JSX.Element {
+  const [dance, setDance] = useState<string | null>(null)
+  const lastDance = useRef<string | null>(null)
+  const start = (): void => {
+    if (dance !== null) return
+    const choices = WHALE_DANCES.filter((name) => name !== lastDance.current)
+    const next = choices[Math.floor(Math.random() * choices.length)]
+    lastDance.current = next
+    setDance(next)
+  }
+  return (
+    <span className="empty-logo" onMouseEnter={start} onClick={start}>
+      <img src={whaleUrl} alt="" className={dance === null ? undefined : `dance-${dance}`}
+        onAnimationEnd={() => setDance(null)} />
+    </span>
+  )
+}
+
 function PlusIcon(): React.JSX.Element {
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true">
@@ -391,15 +413,6 @@ function BackIcon(): React.JSX.Element {
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true">
       <path d="m12.5 4.5-5.5 5.5 5.5 5.5" />
-    </svg>
-  )
-}
-
-function TextSizeIcon(): React.JSX.Element {
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true">
-      <path d="M2.5 14.5 6.25 5h1.5l3.75 9.5M4.1 11.4h5.8" />
-      <path d="M12.4 14.5 15 7.6h1.1l2.6 6.9M13.5 12.4h4.1" />
     </svg>
   )
 }
@@ -471,14 +484,10 @@ function TabAffinityBanner({
   state,
   copy,
   onDecision,
-  onReturn,
-  returnPending,
 }: {
   state: TabAffinityState | null
   copy: PanelCopy
   onDecision: (decision: TabAffinityDecision) => void
-  onReturn: () => void
-  returnPending: boolean
 }): React.JSX.Element | null {
   if (state === null || state.status === 'unbound' || state.status === 'following') return null
   const controlled = tabLabel(state.controlled, copy.tabHandoff.closedTab)
@@ -515,33 +524,12 @@ function TabAffinityBanner({
           <span title={active}>{active}</span>
         </span>
       </div>
-      <p>{body}</p>
+      {!handoff && <p>{body}</p>}
       <div className="tab-affinity-actions">
-        {canReturnToControlledTab(state) && (
-          <button
-            type="button"
-            className="return"
-            onClick={onReturn}
-            disabled={returnPending}
-            aria-busy={returnPending}
-          >
-            {copy.tabHandoff.returnToAssistant}
-          </button>
-        )}
         {handoff && <button className="keep" onClick={() => onDecision('keep')}>{copy.tabHandoff.keep}</button>}
         {state.active !== null && (
           <button className="follow" onClick={() => onDecision('follow')}>
             {lost ? copy.tabHandoff.useCurrent : handoff ? copy.tabHandoff.follow : copy.tabHandoff.followCurrent}
-          </button>
-        )}
-        {handoff && (
-          <button className="keep-always" onClick={() => onDecision('keep-always')}>
-            {copy.tabHandoff.keepAlways}
-          </button>
-        )}
-        {!handoff && !lost && state.pinned && (
-          <button className="keep-always" onClick={() => onDecision('ask-again')}>
-            {copy.tabHandoff.askAgain}
           </button>
         )}
       </div>
@@ -771,10 +759,8 @@ export function App(): React.JSX.Element {
   const [uiScale, setUiScale] = useState(DEFAULT_UI_SCALE)
   const uiScaleRef = useRef(DEFAULT_UI_SCALE)
   const uiScaleChosenRef = useRef(false)
-  const [showTextSize, setShowTextSize] = useState(false)
   const [approvalQueue, setApprovalQueue] = useState<ApprovalRequest[]>([])
   const [tabAffinity, setTabAffinity] = useState<TabAffinityState | null>(null)
-  const [tabAffinityReturnPending, setTabAffinityReturnPending] = useState(false)
   const [trustedOriginInput, setTrustedOriginInput] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [showSessionPicker, setShowSessionPicker] = useState(false)
@@ -962,6 +948,7 @@ export function App(): React.JSX.Element {
         trustedActionOrigins: raw?.trustedActionOrigins ?? [],
         approvalNotifications: raw?.approvalNotifications ?? true,
         autoResumeSession: raw?.autoResumeSession ?? true,
+        askOnTabSwitch: raw?.askOnTabSwitch ?? true,
       })
     })
   }, [])
@@ -2427,25 +2414,6 @@ export function App(): React.JSX.Element {
     }
   }
 
-  /**
-   * Ask the background to move this browser's visible tab back to the page the
-   * assistant is bound to. A stale revision means the user already switched
-   * again; the fresh state is on its way, so that case stays silent.
-   */
-  async function returnToControlledTab(): Promise<void> {
-    if (tabAffinity === null || tabAffinityReturnPending) return
-    setTabAffinityReturnPending(true)
-    try {
-      await api.returnToControlledTab(tabAffinity.revision)
-    } catch (cause) {
-      if (!(cause instanceof PanelRpcError && cause.code === 'stale-revision')) {
-        setError(cause instanceof Error ? cause.message : String(cause))
-      }
-    } finally {
-      setTabAffinityReturnPending(false)
-    }
-  }
-
   function addTrustedOrigin(): void {
     const origin = normalizeWebOrigin(trustedOriginInput)
     if (origin === null) return
@@ -2592,6 +2560,9 @@ export function App(): React.JSX.Element {
             </select>
           </label>
         </div>
+        <TextSizePanel scale={uiScale} copy={copy}
+          onStep={(direction) => changeUiScale(stepUiScale(uiScaleRef.current, direction))}
+          onReset={() => changeUiScale(DEFAULT_UI_SCALE)} />
         <div className="settings-panel">
           <label>
             <span>{copy.settings.bridgeAddress}</span>
@@ -2743,6 +2714,21 @@ export function App(): React.JSX.Element {
               onChange={(event) => setSettings((current) => current === null
                 ? current
                 : { ...current, autoResumeSession: event.target.checked })}
+            />
+            <span className="setting-toggle-control" aria-hidden="true"><span /></span>
+          </label>
+          <label className="setting-toggle">
+            <span className="setting-toggle-copy">
+              <strong>{copy.settings.askOnTabSwitch}</strong>
+              <small>{copy.settings.askOnTabSwitchHelp}</small>
+            </span>
+            <input
+              className="setting-toggle-input"
+              type="checkbox"
+              checked={settings?.askOnTabSwitch ?? true}
+              onChange={(event) => setSettings((current) => current === null
+                ? current
+                : { ...current, askOnTabSwitch: event.target.checked })}
             />
             <span className="setting-toggle-control" aria-hidden="true"><span /></span>
           </label>
@@ -2898,10 +2884,6 @@ export function App(): React.JSX.Element {
             aria-label={copy.app.newSession} title={copy.app.newSession}>
             <PlusIcon />
           </button>
-          <button className="icon-button text-size-trigger" onClick={() => setShowTextSize((open) => !open)}
-            aria-expanded={showTextSize} aria-label={copy.textSize.open} title={copy.textSize.open}>
-            <TextSizeIcon />
-          </button>
           <button className="icon-button settings-trigger" onClick={() => {
             setShowModelPicker(false)
             setShowSettings(true)
@@ -2909,17 +2891,10 @@ export function App(): React.JSX.Element {
             aria-label={copy.app.openSettings} title={copy.app.settings}><SettingsIcon /></button>
         </div>
       </header>
-      {showTextSize && (
-        <TextSizePanel scale={uiScale} copy={copy}
-          onStep={(direction) => changeUiScale(stepUiScale(uiScaleRef.current, direction))}
-          onReset={() => changeUiScale(DEFAULT_UI_SCALE)} />
-      )}
       <TabAffinityBanner
         state={tabAffinity}
         copy={copy}
         onDecision={decideTabAffinity}
-        onReturn={returnToControlledTab}
-        returnPending={tabAffinityReturnPending}
       />
       {showSessionPicker && (
         <section className="session-picker" aria-label={copy.app.sessions}>
@@ -2965,19 +2940,15 @@ export function App(): React.JSX.Element {
       )}
       <div className="messages-pane">
       <div className="messages" ref={scrollRef} onScroll={syncScrollBottom}>
-        {rows.length === 0 && streamRow === null && !working && (
-          <div className="empty">
-            <span className="empty-logo"><img src={whaleUrl} alt="" /></span>
-            <div>
-              <h1>{copy.app.emptyTitle}</h1>
-              <p>{copy.app.emptyDescription}</p>
-            </div>
-            <button disabled={!sessionReady}
-              onClick={() => { void send(copy.app.overviewPrompt) }}>
-              {copy.app.overviewPage}
-            </button>
+        {rows.length === 0 && streamRow === null && !working && (<>
+          <div className="star-banner">
+            <span>{copy.app.starBanner}</span>
+            <a href={PROJECT_URL} target="_blank" rel="noreferrer noopener">{copy.app.starBannerAction}</a>
           </div>
-        )}
+          <div className="empty">
+            <DancingWhale />
+          </div>
+        </>)}
         {rows.map((row) => (
           <div key={row.seq} className={`row ${row.kind}`}>
             {row.kind === 'assistant' && <span className="assistant-avatar"><img src={whaleUrl} alt={copy.app.assistant} /></span>}

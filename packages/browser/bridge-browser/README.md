@@ -32,7 +32,7 @@ The package declares `dsh.bundle.patch` as `./cordis.patch.yml`. The installer r
 
 The bridge and extension share one pnpm workspace. Bridge source imports `@deepseek-ai/cordis` and `@deepseek-ai/schemastery` directly, and its DSH dependencies match the workspace's pinned release. The root build builds the bridge before the extension.
 
-The package manifest declares that support itself: `engines.dsh` (`^0.2.2-rc.2`) and `dsh.manifestVersion: 1` let dsh refuse an incompatible host before loading the plugin, and the Plugins page reads the localized title and description from `locale/en.json` / `locale/zh.json` plus the icon from `icon.svg` without activating the plugin.
+The package manifest declares that support itself: `engines.dsh` (`^0.2.2-rc.5`) and `dsh.manifestVersion: 1` let dsh refuse an incompatible host before loading the plugin, and the Plugins page reads the localized title and description from `locale/en.json` / `locale/zh.json` plus the icon from `icon.svg` without activating the plugin.
 
 ## Host methods the panel drives
 

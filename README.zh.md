@@ -11,7 +11,7 @@
 页面会转换为结构化文本和带编号的交互元素清单。工具通过编号或选择器定位元素；`browser_screenshot` 经批准后截取受控标签页的可视区域。宿主声明图片能力时，侧栏也可发送 PNG、JPEG、WebP 和 GIF 附件。
 
 > [!IMPORTANT]
-> 工作区固定使用 DSH 0.2.2-rc.2。
+> 工作区固定使用 DSH 0.2.2-rc.5。
 
 ## 快速安装
 
@@ -126,7 +126,7 @@ cd ~/.dsh/dsh-browser && pnpm start
 使用源码 checkout 时，请在仓库根目录运行 `pnpm start`。受支持的精确公开版本为：
 
 ```sh
-npx @deepseek-ai/dsh@0.2.2-rc.2 web
+npx @deepseek-ai/dsh@0.2.2-rc.5 web
 ```
 
 Chrome 本机使用无需配置；Firefox 需要填写上述本地桥 token。打开页面，点击 DeepSeek 鲸鱼图标，等待侧边栏显示**已连接**。已有 HTTP(S) 标签页会在第一次操作时自动加载。在浏览器受保护页面和扩展商店中，模型可以读取标签页元数据，并通过浏览器级能力导航到 HTTP(S)、后退、前进和刷新，但不能读取或操作受保护页面的 DOM。

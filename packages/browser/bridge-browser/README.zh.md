@@ -32,7 +32,7 @@ dsh 的**浏览器操作桥**挂载经过 token 认证的 WebSocket 通道（`/e
 
 桥接插件和扩展共用一个 pnpm workspace。桥接源码直接导入 `@deepseek-ai/cordis` 和 `@deepseek-ai/schemastery`，DSH 依赖与工作区固定版本保持一致。根目录构建命令先构建桥接插件，再构建扩展。
 
-插件清单自带这层声明：`engines.dsh`（`^0.2.2-rc.2`）与 `dsh.manifestVersion: 1` 让 dsh 在加载插件前拒绝不兼容的宿主；插件页直接读取 `locale/en.json` / `locale/zh.json` 里的标题与简介、以及 `icon.svg` 图标来展示，无需激活插件。
+插件清单自带这层声明：`engines.dsh`（`^0.2.2-rc.5`）与 `dsh.manifestVersion: 1` 让 dsh 在加载插件前拒绝不兼容的宿主；插件页直接读取 `locale/en.json` / `locale/zh.json` 里的标题与简介、以及 `icon.svg` 图标来展示，无需激活插件。
 
 ## 面板驱动的 Host 方法
 

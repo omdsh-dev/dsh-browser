@@ -58,9 +58,14 @@ async function command(args) {
 
 async function verifyPanelTheme(page, scheme, selectors) {
   await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' })
-  await waitFor(() => page.evaluate(expected => getComputedStyle(document.documentElement).colorScheme === expected, scheme),
-    `${scheme} panel color scheme`)
-  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  await waitFor(async () => {
+    const panel = await page.evaluate(() => ({
+      scheme: getComputedStyle(document.documentElement).colorScheme,
+      background: getComputedStyle(document.body).backgroundColor,
+    }))
+    const luminance = relativeLuminance(panel.background.match(/[\d.]+/g).map(Number))
+    return panel.scheme === scheme && (scheme === 'dark' ? luminance < 0.15 : luminance > 0.75)
+  }, `${scheme} panel color scheme`)
   const swatches = await page.evaluate(selectors => {
     const channels = color => color.match(/[\d.]+/g).map(Number)
     const background = element => {
@@ -79,7 +84,9 @@ async function verifyPanelTheme(page, scheme, selectors) {
     const foreground = relativeLuminance(swatch.foreground)
     const background = relativeLuminance(swatch.background)
     const contrast = (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05)
-    if (!swatch.disabled) assert.ok(contrast >= 4.5, `${scheme} ${swatch.selector}: text contrast ${contrast.toFixed(2)}`)
+    if (!swatch.disabled) {
+      assert.ok(contrast >= 4.5, `${scheme} ${swatch.selector}: text contrast ${contrast.toFixed(2)} (rgb(${swatch.foreground}) on rgb(${swatch.background}))`)
+    }
     assert.ok(scheme === 'dark' ? background < 0.15 : background > 0.75,
       `${scheme} ${swatch.selector}: background luminance ${background.toFixed(2)}`)
   }
@@ -427,6 +434,8 @@ try {
   const composer = chat.locator('textarea')
   await composer.waitFor()
   await waitFor(() => composer.isEnabled(), 'chat session readiness')
+  await verifyPanelTheme(chat, 'dark', ['.star-banner', '.star-banner a'])
+  await chat.emulateMedia({ colorScheme: 'light' })
   await chat.locator('input[type=file]').setInputFiles(join(root, 'extensions/dsh-browser/assets/icons/icon32.png'))
   await composer.fill('Describe this image.')
   await chat.getByRole('button', { name: 'Send message', exact: true }).click()
@@ -449,7 +458,7 @@ try {
     await chat.screenshot({ path: join(directory, `theme-${scheme}-permission.png`), animations: 'disabled' })
     await chat.getByRole('button', { name: 'Cancel', exact: true }).click()
     await chat.getByRole('button', { name: 'Open settings', exact: true }).click()
-    await verifyPanelTheme(chat, scheme, ['.settings h1', '.settings input', '.settings select', '.update-status strong'])
+    await verifyPanelTheme(chat, scheme, ['.settings h1', '.settings input', '.settings select', '.text-size-panel > strong', '.update-status strong'])
     await chat.screenshot({ path: join(directory, `theme-${scheme}-settings.png`), animations: 'disabled' })
     await chat.getByRole('button', { name: 'Back to chat', exact: true }).click()
     assert.equal(await composer.inputValue(), 'Keep this draft.')
