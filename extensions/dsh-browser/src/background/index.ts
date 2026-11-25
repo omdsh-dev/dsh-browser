@@ -50,6 +50,7 @@ import {
 import type { ServerFrame } from '@yuxianglin/dsh-bridge-browser/src/protocol.ts'
 import { BRIDGE_CONFIG_PATH, BRIDGE_PATH, DEVTOOLS_CAPS_VERSION, parseBridgeConfigPayload } from '@yuxianglin/dsh-bridge-browser/src/protocol.ts'
 import { BridgeClient, type BridgeState } from './bridge.ts'
+import { requestHostStart, requestHostStop } from './native-host.ts'
 import { createRpc } from './rpc.ts'
 import { discoverInstances, planDiscovery, readBridgeConfig } from './discovery.ts'
 import { frameDocumentKey, listTabFrames } from './frames.ts'
@@ -1734,6 +1735,59 @@ async function startBridge(): Promise<void> {
   bridge.start(url, settings.token)
 }
 
+/** Retry window opened when the toolbar menu starts a host that may still boot. */
+const HOST_BOOT_ALARM = 'host-boot-retry'
+/** Storage key of that window's deadline, so an alarm fired after a worker
+ * restart still knows the window is real. */
+const HOST_BOOT_UNTIL_KEY = 'hostBootUntil'
+/** Delay between discovery retries while a freshly started host boots. */
+const HOST_BOOT_RETRY_MS = 4_000
+/** Retry cap inside one open window (the deadline is the outer bound). */
+const HOST_BOOT_MAX_ATTEMPTS = 30
+/** How long a started host may take to answer discovery before giving up. */
+const HOST_BOOT_WINDOW_MS = 5 * 60_000
+
+let hostBootAttempts = 0
+
+/** Read whether the bridge WebSocket is up; a call keeps TS from narrowing
+ * `bridge.state` across an `await`. */
+function bridgeIsConnected(): boolean {
+  return bridge?.state === 'connected'
+}
+
+/** Persist (or clear) the retry window deadline. */
+function setHostBootDeadline(until: number): Promise<void> {
+  return Promise.resolve(chrome.storage.local.set({ [HOST_BOOT_UNTIL_KEY]: until })).catch(() => {})
+}
+
+/** Read the retry window deadline; 0 when no window is open. */
+async function hostBootDeadline(): Promise<number> {
+  try {
+    const stored = await chrome.storage.local.get(HOST_BOOT_UNTIL_KEY)
+    const value = stored[HOST_BOOT_UNTIL_KEY]
+    return typeof value === 'number' ? value : 0
+  } catch {
+    return 0
+  }
+}
+
+/** Stop waking the worker while keeping the window deadline for a later panel. */
+function pauseHostBootRetry(): void {
+  void Promise.resolve(chrome.alarms.clear(HOST_BOOT_ALARM)).catch(() => {})
+}
+
+/** Close the retry window and drop its alarm. */
+function closeHostBootWindow(): void {
+  hostBootAttempts = 0
+  void setHostBootDeadline(0)
+  pauseHostBootRetry()
+}
+
+/** Ask for one more discovery attempt inside the current window. */
+function armHostBootRetry(): void {
+  chrome.alarms.create(HOST_BOOT_ALARM, { when: Date.now() + HOST_BOOT_RETRY_MS })
+}
+
 /**
  * Enumerate every local instance for the settings picker.
  *
@@ -1852,12 +1906,21 @@ chrome.runtime.onConnect.addListener((port) => {
   panelPorts.add(port)
   if (wasIdle) armBridgeKeepalive()
   void settingsReady.then(syncSelectionWatch)
-  void settingsReady.then(() => {
+  void settingsReady.then(async () => {
     if (!panelPorts.has(port)) return
-    // One automatic pass per panel lease: a confirmed miss stays terminal until
-    // the lease ends or the user asks again (settings save / 自动检测).
-    if (discoveryLatch === 'not-found') return
-    if (bridge === null || bridge.state === 'stopped') return startBridge()
+    // Opening the panel only probes: it must never start the host by itself.
+    // The explicit "启动 dsh 服务" menu entry owns starting it, so a stopped
+    // service stays stopped until the user asks for it to come back.
+    if (bridge !== null && bridge.state !== 'stopped') return
+    await startBridge()
+    // The menu may have just started a host that is still booting, or the
+    // worker may have restarted and dropped the retry alarm. Resume the
+    // window instead of freezing on this pass's first miss.
+    if (bridgeIsConnected()) { closeHostBootWindow(); return }
+    if (await hostBootDeadline() > Date.now()) {
+      hostBootAttempts = 0
+      armHostBootRetry()
+    }
   })
   try { port.postMessage(statusPayload()) } catch { /* port closed */ }
   broadcastDevToolsState()
@@ -2211,6 +2274,9 @@ chrome.runtime.onConnect.addListener((port) => {
       sessionDevToolsGrant = false
       cancelDevToolsCalls()
       bridgeStartRevision += 1
+      // Keep a menu-opened boot window alive (deadline in storage) but stop
+      // waking the worker for it; a reopened panel resumes the retries.
+      pauseHostBootRetry()
       bridge?.suspendReconnect()
       sessionTrustedActionOrigins.clear()
       approvals.notifyPending()
@@ -2343,6 +2409,29 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
 // ---- Keepalive ----
 
 chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === HOST_BOOT_ALARM) {
+    void (async () => {
+      const until = await hostBootDeadline()
+      if (until === 0 || Date.now() > until || bridgeIsConnected()) {
+        closeHostBootWindow()
+        return
+      }
+      if (panelPorts.size === 0) {
+        // No panel to serve: stop waking the worker, but keep the deadline so
+        // a panel opened later in the window resumes the retries.
+        pauseHostBootRetry()
+        return
+      }
+      if (hostBootAttempts >= HOST_BOOT_MAX_ATTEMPTS) { closeHostBootWindow(); return }
+      hostBootAttempts += 1
+      discoveryLatch = 'idle'
+      await startBridge()
+      if (bridgeIsConnected()) closeHostBootWindow()
+      else if (panelPorts.size === 0) pauseHostBootRetry()
+      else armHostBootRetry()
+    })()
+    return
+  }
   if (alarm.name !== BRIDGE_KEEPALIVE_ALARM) return
   // A confirmed miss is terminal for this lease: do not re-probe in the
   // background, and do not wake the worker for it either.
@@ -2390,3 +2479,98 @@ disarmBridgeKeepalive()
 
 // `settingsReady` intentionally has no bridge-start continuation: opening a
 // side panel is the first action allowed to claim the bridge connection.
+
+// ---- Toolbar right-click menu: start / stop the local dsh service ----
+
+/** Menu ids; stable strings because the browser stores them across restarts. */
+const MENU_START_HOST = 'dsh-host-start'
+const MENU_STOP_HOST = 'dsh-host-stop'
+
+/** Toast helper: notifications are best effort, never fatal. */
+function notifyHost(title: string, message: string): void {
+  try {
+    chrome.notifications.create({
+      type: 'basic',
+      iconUrl: 'assets/icons/icon128.png',
+      title,
+      message,
+    }, () => { void chrome.runtime.lastError })
+  } catch {
+    /* notifications unavailable */
+  }
+}
+
+/** (Re)create the toolbar entries so titles follow the current locale. */
+function syncContextMenus(): void {
+  const zh = getUiLocale() === 'zh'
+  const items = [
+    { id: MENU_START_HOST, title: zh ? '启动 dsh 服务' : 'Start dsh service' },
+    { id: MENU_STOP_HOST, title: zh ? '停止 dsh 服务' : 'Stop dsh service' },
+  ]
+  // Items persist across service-worker restarts, so clear first: recreating
+  // with the same id would fail and leave stale (wrong-locale) titles.
+  void Promise.resolve(chrome.contextMenus.removeAll()).then(() => {
+    for (const item of items) {
+      chrome.contextMenus.create({ ...item, contexts: ['action'] }, () => { void chrome.runtime.lastError })
+    }
+  })
+}
+
+/** Start (or confirm) the service, then let an open panel connect. */
+async function startHostFromMenu(): Promise<void> {
+  const zh = getUiLocale() === 'zh'
+  const result = await requestHostStart()
+  if (!result.ok) {
+    notifyHost('dsh', zh ? '无法启动本地服务：原生消息宿主不可用' : 'Cannot start the local service: native host unavailable')
+    return
+  }
+  if (result.spawned === true || result.booting === true) {
+    // The beacon answers only after the server binds (a few seconds): open a
+    // persisted retry window so a panel open now — or opened moments later —
+    // reconnects on its own.
+    hostBootAttempts = 0
+    await setHostBootDeadline(Date.now() + HOST_BOOT_WINDOW_MS)
+    armHostBootRetry()
+  }
+  if (panelPorts.size > 0) {
+    discoveryLatch = 'idle'
+    await startBridge()
+    if (bridgeIsConnected()) closeHostBootWindow()
+  }
+  notifyHost('dsh', result.running
+    ? (zh ? '本地服务已在运行' : 'The local service is already running')
+    : (zh ? '本地服务已启动，正在等待连接' : 'The local service is starting'))
+}
+
+/** Stop the service and drop the bridge connection with it. */
+async function stopHostFromMenu(): Promise<void> {
+  const zh = getUiLocale() === 'zh'
+  const result = await requestHostStop()
+  closeHostBootWindow()
+  discoveryLatch = 'idle'
+  bridge?.stop()
+  bridge = null
+  rpc = null
+  connectedAddress = undefined
+  broadcastStatus()
+  if (!result.ok) {
+    notifyHost('dsh', zh ? '无法停止本地服务：原生消息宿主不可用' : 'Cannot stop the local service: native host unavailable')
+    return
+  }
+  notifyHost('dsh', result.stopped
+    ? (zh ? '本地服务已停止' : 'The local service was stopped')
+    : (zh ? '当前没有正在运行的服务' : 'No local service was running'))
+}
+
+// contextMenus is required by the shipped manifest; the guard keeps a host
+// that does not expose it (older runtimes, test stubs) loading without a menu
+// instead of failing the whole service worker.
+if (typeof chrome.contextMenus?.create === 'function') {
+  chrome.runtime.onInstalled?.addListener(syncContextMenus)
+  chrome.runtime.onStartup?.addListener(syncContextMenus)
+  chrome.contextMenus.onClicked?.addListener((info) => {
+    if (info.menuItemId === MENU_START_HOST) void startHostFromMenu()
+    else if (info.menuItemId === MENU_STOP_HOST) void stopHostFromMenu()
+  })
+  syncContextMenus()
+}

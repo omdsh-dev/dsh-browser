@@ -36,7 +36,7 @@ $BridgePlugin = '@yuxianglin/dsh-bridge-browser'
 function Write-Step {
   param([int]$Number, [string]$Zh, [string]$En)
   Write-Host ''
-  Write-Host ("[{0}/4] {1}" -f $Number, $Zh)
+  Write-Host ("[{0}/5] {1}" -f $Number, $Zh)
   Write-Host ("      {0}" -f $En)
 }
 
@@ -316,6 +316,136 @@ function Invoke-Quiet {
   }
 }
 
+# ---- Native messaging host (toolbar start/stop of the local dsh service) ----
+# The side panel cannot spawn processes itself, so the extension asks a native
+# host to start `dsh web` when the user picks "启动 dsh 服务". Chromium only
+# launches executables, so on Windows DshNativeHost.exe relays stdio to
+# native-host/host.mjs; the manifest points at the exe and whitelists the
+# unpacked extension's id.
+
+$NativeHostName = 'com.dsh.browser_host'
+
+function Get-ExtensionId {
+  <#
+    Mirrors Chromium's crx_file::id_util::GenerateIdForPath on Windows, which
+    is how an unpacked extension's id is derived from its load path:
+    uppercase the drive letter, SHA-256 the UTF-16LE path bytes, and map each
+    nibble of the first 16 digest bytes to the a-p alphabet. Path case matters
+    (everything except the drive letter is kept as-is), so this must be fed
+    the exact directory the user selects in the file picker.
+  #>
+  param([Parameter(Mandatory = $true)][string]$ExtensionDir)
+
+  $normalized = $ExtensionDir
+  if ($normalized.Length -ge 2 -and $normalized[1] -eq ':' -and
+      $normalized[0] -ge 'a' -and $normalized[0] -le 'z') {
+    $normalized = $normalized.Substring(0, 1).ToUpperInvariant() + $normalized.Substring(1)
+  }
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $hash = $sha.ComputeHash([System.Text.Encoding]::Unicode.GetBytes($normalized))
+  } finally {
+    $sha.Dispose()
+  }
+  $builder = New-Object System.Text.StringBuilder
+  foreach ($byte in $hash) {
+    [void]$builder.Append([char]([int][char]'a' + (($byte -shr 4) -band 0xF)))
+    [void]$builder.Append([char]([int][char]'a' + ($byte -band 0xF)))
+    if ($builder.Length -ge 32) { break }
+  }
+  return $builder.ToString(0, 32)
+}
+
+function Build-NativeHostShim {
+  <# Compile the stdio-relay exe next to host.mjs. Returns $false when no
+     C# compiler is available; the caller then continues without auto-start. #>
+  param([Parameter(Mandatory = $true)][string]$NativeHostDir)
+
+  $source = Join-Path $NativeHostDir 'DshNativeHost.cs'
+  $output = Join-Path $NativeHostDir 'DshNativeHost.exe'
+  if ((Test-Path -LiteralPath $output -PathType Leaf) -and
+      (Get-Item -LiteralPath $output).LastWriteTimeUtc -ge (Get-Item -LiteralPath $source).LastWriteTimeUtc) {
+    return $true
+  }
+  $compilers = @(
+    (Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'),
+    (Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe')
+  )
+  # Compile from inside the directory with bare file names so a non-ASCII
+  # checkout path never reaches the compiler's command line.
+  $previousLocation = Get-Location
+  try {
+    Set-Location -LiteralPath $NativeHostDir
+    foreach ($csc in $compilers) {
+      if (-not (Test-Path -LiteralPath $csc -PathType Leaf)) { continue }
+      $previousPreference = $ErrorActionPreference
+      $ErrorActionPreference = 'Continue'
+      try {
+        & $csc /nologo /target:winexe /out:DshNativeHost.exe DshNativeHost.cs 2>&1 | Out-Null
+      } finally {
+        $ErrorActionPreference = $previousPreference
+      }
+      if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $output -PathType Leaf)) { return $true }
+    }
+  } finally {
+    Set-Location -LiteralPath $previousLocation
+  }
+  return $false
+}
+
+function Install-NativeMessagingHost {
+  <# Render the host manifest and register it for the local Chromium browsers
+     (and Firefox, which reads the same manifest via a different key). #>
+  param(
+    [Parameter(Mandatory = $true)][string]$Root,
+    [Parameter(Mandatory = $true)][string]$ExtensionDir
+  )
+
+  $nativeHostDir = Join-Path $Root 'native-host'
+  $template = Join-Path $nativeHostDir 'com.dsh.browser_host.json.template'
+  if (-not (Test-Path -LiteralPath $template -PathType Leaf)) { return $false }
+  if (-not (Build-NativeHostShim -NativeHostDir $nativeHostDir)) { return $false }
+
+  $extensionId = Get-ExtensionId -ExtensionDir $ExtensionDir
+  $firefoxManifest = Join-Path $ExtensionDir 'manifest.firefox.json'
+  $firefoxId = 'dsh-browser@lum1104.github.io'
+  if (Test-Path -LiteralPath $firefoxManifest -PathType Leaf) {
+    try {
+      $geckoId = (Get-Content -LiteralPath $firefoxManifest -Raw -Encoding UTF8 | ConvertFrom-Json).browser_specific_settings.gecko.id
+      if ($geckoId) { $firefoxId = $geckoId }
+    } catch { }
+  }
+
+  $hostExe = Join-Path $nativeHostDir 'DshNativeHost.exe'
+  $manifest = Get-Content -LiteralPath $template -Raw -Encoding UTF8
+  $manifest = $manifest.Replace('{{HOST_EXE_PATH}}', $hostExe.Replace('\', '\\'))
+  $manifest = $manifest.Replace('{{EXTENSION_ID}}', $extensionId)
+  $manifest = $manifest.Replace('{{FIREFOX_EXTENSION_ID}}', $firefoxId)
+  $manifestPath = Join-Path $nativeHostDir 'com.dsh.browser_host.json'
+  [System.IO.File]::WriteAllText($manifestPath, $manifest, (New-Object System.Text.UTF8Encoding $false))
+
+  # Firefox uses allowed_extensions; every Chromium browser uses
+  # allowed_origins. Each browser reads the manifest through its own key.
+  $registryRoots = @(
+    'HKCU:\Software\Microsoft\Edge\NativeMessagingHosts',
+    'HKCU:\Software\Google\Chrome\NativeMessagingHosts',
+    'HKCU:\Software\Chromium\NativeMessagingHosts',
+    'HKCU:\Software\Mozilla\NativeMessagingHosts'
+  )
+  foreach ($rootPath in $registryRoots) {
+    try {
+      if (-not (Test-Path -LiteralPath $rootPath)) { New-Item -Path $rootPath -Force | Out-Null }
+      $keyPath = Join-Path $rootPath $NativeHostName
+      New-Item -Path $keyPath -Force | Out-Null
+      Set-ItemProperty -Path $keyPath -Name '(Default)' -Value $manifestPath
+    } catch {
+      # A denied key only disables auto-start for that browser; the extension
+      # still works with the manual start flow.
+    }
+  }
+  return $true
+}
+
 function Install-RemoteWorkspace {
   Assert-Command 'Expand-Archive' "当前 PowerShell 缺少 Expand-Archive；请升级到 PowerShell 5.1 或更高版本。" "This PowerShell has no Expand-Archive; upgrade to PowerShell 5.1 or newer."
 
@@ -463,6 +593,14 @@ $InstallMode = if (Test-Path -LiteralPath (Join-Path $Root '.managed-by-install-
 & node (Join-Path $Root 'scripts\write-install-info.mjs') `
   (Join-Path $DistDir 'install-info.json') $InstallMode $Root $DshHomeDir
 if ($LASTEXITCODE -ne 0) { Stop-Install '写入安装信息失败。' 'Writing install metadata failed.' }
+
+Write-Step 5 "安装原生消息宿主" "Install the native messaging host"
+if (Install-NativeMessagingHost -Root $Root -ExtensionDir $DistDir) {
+  # Single quotes are required: PowerShell treats “ ” as string delimiters.
+  Write-Pair '已注册“启动/停止 dsh 服务”右键菜单所需的消息宿主。' 'Registered the native host behind the start/stop dsh service toolbar menu.'
+} else {
+  Write-Pair "未能编译原生消息宿主，自动启动功能暂不可用（其余功能不受影响）。" "The native messaging host could not be built; auto-start is unavailable (everything else still works)."
+}
 
 $ClipboardReady = Set-ClipboardText $DistDir
 $ChromeOpened = Start-ExtensionsPage (Get-BrowserPath)
