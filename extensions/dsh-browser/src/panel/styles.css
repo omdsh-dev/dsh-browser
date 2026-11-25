@@ -3571,7 +3571,10 @@ textarea:focus-visible {
     background: var(--surface);
   }
 
-  .star-banner a {
+  .star-banner a,
+  .relay-fetch,
+  .relay-profile-actions button:hover:not(:disabled),
+  .tab-affinity.background .tab-affinity-actions .follow:hover {
     color: var(--blue-ink);
   }
 
