@@ -6,3 +6,9 @@ node_modules/
 **/dist-firefox/
 coverage/
 .artifacts/
+
+# Native messaging host: build output, install-rendered manifest, runtime state
+native-host/*.exe
+native-host/*.log
+native-host/host-lock.json
+native-host/com.dsh.browser_host.json

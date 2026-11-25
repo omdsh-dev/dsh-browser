@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import { App } from './App.tsx'
+import 'katex/dist/katex.min.css'
 import './styles.css'
 import { getUiLocale, loadUiLocalePreference } from '../i18n.ts'
 import { PANEL_COPY } from './strings.ts'

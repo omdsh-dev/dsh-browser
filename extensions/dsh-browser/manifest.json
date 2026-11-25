@@ -16,7 +16,9 @@
     "notifications",
     "debugger",
     "clipboardWrite",
-    "offscreen"
+    "offscreen",
+    "nativeMessaging",
+    "contextMenus"
   ],
   "host_permissions": [
     "<all_urls>"

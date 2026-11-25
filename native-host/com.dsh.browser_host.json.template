@@ -1,0 +1,12 @@
+{
+  "name": "com.dsh.browser_host",
+  "description": "Starts the local dsh web host that the dsh browser extension talks to",
+  "path": "{{HOST_EXE_PATH}}",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://{{EXTENSION_ID}}/"
+  ],
+  "allowed_extensions": [
+    "{{FIREFOX_EXTENSION_ID}}"
+  ]
+}

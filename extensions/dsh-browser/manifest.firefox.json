@@ -25,7 +25,9 @@
     "scripting",
     "webNavigation",
     "alarms",
-    "notifications"
+    "notifications",
+    "nativeMessaging",
+    "contextMenus"
   ],
   "host_permissions": [
     "<all_urls>"
