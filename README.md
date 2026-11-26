@@ -129,7 +129,7 @@ From a source checkout, run `pnpm start` in the repository root. The exact suppo
 npx @deepseek-ai/dsh@0.2.2-rc.5 web
 ```
 
-Local Chrome use requires no configuration; Firefox requires the local bridge token described above. Open a page, click the DeepSeek whale icon, and wait for **Connected**. Existing HTTP(S) tabs are instrumented on the first action. On browser-protected pages and extension stores, the model can read tab metadata and use browser-level HTTP(S) navigation, back, forward, and reload, but it cannot inspect or operate the protected page DOM.
+With the default Web bridge, local Chrome use requires no configuration; Firefox requires the bridge token described above. For DSH 0.2.3-alpha.2, use [local pairing](packages/browser/bridge-browser/README.md#pair-locally-on-dsh-023-alpha2). Open a page, click the DeepSeek whale icon, and wait for **Connected**. Existing HTTP(S) tabs are instrumented on the first action. On browser-protected pages and extension stores, the model can read tab metadata and use browser-level HTTP(S) navigation, back, forward, and reload, but it cannot inspect or operate the protected page DOM.
 
 ## Troubleshooting
 

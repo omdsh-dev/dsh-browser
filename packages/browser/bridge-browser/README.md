@@ -17,14 +17,31 @@ Page snapshots contain structured text with numbered controls and masked form fi
 | `devToolsMaxChars` | `number` | 24000 | Upper bound on one developer-tools result's characters, minimum 500. |
 | `sessionWorkspacePath` | `string` | `~/.dsh/browser-sessions` | Dedicated Host Workspace for extension-created sessions. The plugin creates and idempotently registers the directory on the first implicit `session.create`; the session cwd becomes this path, so the GUI shows a `browser-sessions` workspace group. Set `""` to keep sessions Ungrouped. |
 | `deferSessionCreate` | `boolean` | `true` | Sessions materialize only on the first message: `session.create` answers with a provisional id (nothing persisted), history reads empty, and the first `session.prompt` creates the real session (same id, original payload). Opening the panel without chatting leaves zero trace in the session store/GUI. |
-| `beacon` | `boolean` | `true` | Also answer the discovery endpoint on a fixed loopback port, so a randomly assigned Web port (DSH Desktop starts its host with `--port 0`) stays discoverable. Binding failures are diagnostics only; the bridge itself is unaffected. |
+| `beacon` | `boolean` | `true` | Also answer the discovery endpoint on a fixed loopback port, so a randomly assigned Web port (DSH Desktop starts its host with `--port 0`) stays discoverable. In the default mode, the Web bridge still works if no beacon port is free. |
 | `beaconPorts` | `number[]` | `43189…43198` | Candidate beacon ports, tried in order until one binds; the first free port wins, which keeps several local instances discoverable. Ignored when `beacon` is false. |
+| `pairedBeacon` | `boolean` | `false` | Serve the WebSocket on the loopback beacon instead of the Web host. Requires `beacon: true`, a loopback Web bind, and a token in the extension. |
 
 Workspace grouping is best-effort. If the composition has no workspace domain, directory creation fails, or `workspace.create` rejects the path, the plugin logs one warning and sends every session creation without an injected workspace so browser chat remains usable.
 
 ## Usage
 
 See the root README for [installation, updates, startup, and uninstall](../../../README.md#detailed-installation-and-usage).
+
+### Pair locally on DSH 0.2.3-alpha.2
+
+This host checks the request origin before handing a WebSocket to the plugin, so a browser extension cannot connect to the default Web route. In the active profile's Cordis patch, set:
+
+```yaml
+- id: bridge-browser
+  config:
+    pairedBeacon: true
+```
+
+In the extension settings, enter the bridge token once. Use the configured `token`, or read `ext-bridge-token` from your DSH home locally. The extension can still discover the address automatically; if you enter it manually, use the address displayed in DSH settings. The bridge does not change the Web host’s authentication rules.
+
+If every configured beacon port is unavailable, the paired bridge stays offline. Free one of those ports or set `beaconPorts` to an available port; the Web route is not a fallback in paired mode.
+
+Leave `pairedBeacon` off to preserve the existing rc.5 connection behavior. This option addresses the local transport only; it does not migrate other host APIs or offer remote pairing on Alpha.2.
 
 ## Development
 

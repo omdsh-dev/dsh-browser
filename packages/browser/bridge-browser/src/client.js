@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
     const dictionaries = {
       zh: {
         'bridgeAddress.title': '浏览器桥地址',
-        'bridgeAddress.help': '粘贴到 Chrome 扩展「桥地址」设置；本机一般无需 Token。',
+        'bridgeAddress.help': '可粘贴到扩展的「桥地址」设置。启用本机配对时，还需填写 Token。',
         'bridgeAddress.copy': '复制',
         'bridgeAddress.copied': '已复制',
         'bridgeAddress.loading': '正在读取…',
@@ -27,7 +27,7 @@ window.__ModuleLoader__.load({
       },
       en: {
         'bridgeAddress.title': 'Browser bridge address',
-        'bridgeAddress.help': 'Paste into the Chrome extension Bridge address setting. Loopback needs no token.',
+        'bridgeAddress.help': 'Paste into the extension’s Bridge address setting. If local pairing is enabled, also enter the token.',
         'bridgeAddress.copy': 'Copy',
         'bridgeAddress.copied': 'Copied',
         'bridgeAddress.loading': 'Loading…',
@@ -44,11 +44,12 @@ window.__ModuleLoader__.load({
 
     async function resolveBridgeWsUrl(location) {
       const fallback = bridgeWsUrlFromLocation(location)
+      const response = await fetch(`${location.origin}${BRIDGE_CONFIG_PATH}`, {
+        signal: AbortSignal.timeout(1_500),
+      }).catch(() => undefined)
+      if (response?.status === 503) throw new Error('Bridge address unavailable')
+      if (!response?.ok) return fallback
       try {
-        const response = await fetch(`${location.origin}${BRIDGE_CONFIG_PATH}`, {
-          signal: AbortSignal.timeout(1_500),
-        })
-        if (!response.ok) return fallback
         const body = await response.json()
         if (typeof body?.wsUrl === 'string'
           && (body.wsUrl.startsWith('ws://') || body.wsUrl.startsWith('wss://'))) {

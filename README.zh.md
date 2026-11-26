@@ -129,7 +129,7 @@ cd ~/.dsh/dsh-browser && pnpm start
 npx @deepseek-ai/dsh@0.2.2-rc.5 web
 ```
 
-Chrome 本机使用无需配置；Firefox 需要填写上述本地桥 token。打开页面，点击 DeepSeek 鲸鱼图标，等待侧边栏显示**已连接**。已有 HTTP(S) 标签页会在第一次操作时自动加载。在浏览器受保护页面和扩展商店中，模型可以读取标签页元数据，并通过浏览器级能力导航到 HTTP(S)、后退、前进和刷新，但不能读取或操作受保护页面的 DOM。
+默认 Web 桥下，本机 Chrome 无需配置，Firefox 需要填写上述桥接 Token。使用 DSH 0.2.3-alpha.2 时，请按[本机配对说明](packages/browser/bridge-browser/README.zh.md)配置。打开页面，点击 DeepSeek 鲸鱼图标，等待侧边栏显示**已连接**。已有 HTTP(S) 标签页会在第一次操作时自动加载。在浏览器受保护页面和扩展商店中，模型可以读取标签页元数据，并通过浏览器级能力导航到 HTTP(S)、后退、前进和刷新，但不能读取或操作受保护页面的 DOM。
 
 ## 故障排查
 

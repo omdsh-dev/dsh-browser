@@ -2,9 +2,9 @@
  * `@yuxianglin/dsh-bridge-browser`: token-authenticated WebSocket bridge for
  * the browser extension plus the text-only `browser_*` tool set.
  *
- * The bridge mounts its own upgrade route (`/ext/bridge`) on the host
- * webserver, OUTSIDE the /api trust fence — so it brings its own bearer-token
- * authentication (first frame `hello` within HELLO_TIMEOUT_MS). Extension
+ * The bridge mounts `/ext/bridge` on the host webserver by default, or on
+ * its own loopback discovery beacon in paired mode. The paired listener
+ * requires the bearer token in the first `hello` frame. Extension
  * calls, Session streams, and Host waterfalls use dsh's Typert Gateway
  * and Connection services.
  * Tools execute by dispatching
@@ -106,6 +106,8 @@ export interface Config {
    * only find this host by scanning the ephemeral range.
    */
   beacon?: boolean
+  /** Serve the bridge itself on the loopback beacon; require the existing token to pair. */
+  pairedBeacon?: boolean
   /** Candidate beacon ports, tried in order. Defaults to {@link BEACON_PORTS}. */
   beaconPorts?: number[]
 }
@@ -122,6 +124,7 @@ export const Config: z<Config, ResolvedConfig> = z.object({
   sessionWorkspacePath: z.string().default(DEFAULT_SESSION_WORKSPACE_PATH),
   deferSessionCreate: z.boolean().default(DEFAULT_DEFER_SESSION_CREATE),
   beacon: z.boolean().default(DEFAULT_BEACON),
+  pairedBeacon: z.boolean().default(false),
   beaconPorts: z.array(z.number().step(1).min(1).max(65535)).default([...BEACON_PORTS]),
 })
 
@@ -135,6 +138,9 @@ export const Config: z<Config, ResolvedConfig> = z.object({
 export async function apply(ctx: Context, resolved: ResolvedConfig): Promise<void> {
   if (resolved.beacon && resolved.beaconPorts.length === 0) {
     throw new Error('bridge-browser: beaconPorts must name at least one port when the beacon is enabled')
+  }
+  if (resolved.pairedBeacon && (!resolved.beacon || !isLoopbackBindAddress(ctx.webServer.host))) {
+    throw new Error('bridge-browser: pairedBeacon requires an enabled beacon and a loopback Web host')
   }
 
   const gateway = ctx.get('typertGateway') as unknown as GatewayCandidate | undefined
@@ -260,28 +266,27 @@ function mountBridge(
     onCapsChange: () => { syncDevToolsTools() },
   })
 
-  const route: WebUpgradeRoute = {
-    path: BRIDGE_PATH,
-    handler: (req, socket, head) => { server.handleUpgrade(req, socket, head) },
+  if (!resolved.pairedBeacon) {
+    const route: WebUpgradeRoute = {
+      path: BRIDGE_PATH,
+      handler: (req, socket, head) => { server.handleUpgrade(req, socket, head) },
+    }
+    ctx.effect(() => ctx.webServer.registerUpgrade(route), 'bridge-browser: /ext/bridge upgrade route')
   }
-  ctx.effect(() => ctx.webServer.registerUpgrade(route), 'bridge-browser: /ext/bridge upgrade route')
   // 异步 disposer：HMR/卸载时先等桥完全关闭（socket/泵/acceptor 静默）再继续。
   ctx.effect(() => () => server.close(), 'bridge-browser: bridge server')
 
-  // Zero-config discovery endpoint: the extension fetches this to learn the
-  // bridge WebSocket URL without any manual configuration. The URL carries no
-  // secret (loopback connections skip the token); non-loopback deployments
-  // keep requiring the token on the WS itself. `pid`/`startedAt` let the
-  // extension tell several local instances apart without any extra endpoint.
+  // Both discovery endpoints name the active bridge without exposing its token.
   const hostPort = (): number | undefined => {
     const port = ctx.webServer.port
     return typeof port === 'number' ? port : undefined
   }
+  const beaconPort = mountDiscoveryBeacon(ctx, resolved, hostPort, server)
   const configRoute: WebRoute = {
     kind: 'exact',
     path: BRIDGE_CONFIG_PATH,
     handler: (_req, res) => {
-      const port = hostPort()
+      const port = resolved.pairedBeacon ? beaconPort() : hostPort()
       if (port === undefined) {
         res.writeHead(503)
         res.end()
@@ -293,13 +298,6 @@ function mountBridge(
     },
   }
   ctx.effect(() => ctx.webServer.register(configRoute), 'bridge-browser: /ext/bridge-config route')
-
-  // DSH Desktop starts the host with `--port 0`, so the Web port is different
-  // on every launch. A beacon on the first free BEACON_PORTS port advertises
-  // the real URL, which keeps discovery to a bounded probe list. Remote
-  // deployments bind a concrete interface address and are skipped: their
-  // clients cannot use a 127.0.0.1 answer anyway.
-  mountDiscoveryBeacon(ctx, resolved, hostPort)
 
   ctx.effect(() => {
     const disposers = registerBrowserTools(ctx, server, {
@@ -390,22 +388,26 @@ function mountDiscoveryBeacon(
   ctx: Context,
   resolved: ResolvedConfig,
   hostPort: () => number | undefined,
-): void {
+  server: BridgeServer,
+): () => number | undefined {
   if (!resolved.beacon) {
     ctx.logger.info('browser bridge: discovery beacon disabled by configuration')
-    return
+    return () => undefined
   }
   if (!isLoopbackBindAddress(ctx.webServer.host)) {
     ctx.logger.info(`browser bridge: discovery beacon skipped; the host binds ${ctx.webServer.host}, which is not loopback`)
-    return
+    return () => undefined
   }
+  let beacon: DiscoveryBeacon | undefined
   ctx.effect(() => {
-    let beacon: DiscoveryBeacon | undefined
     let disposed = false
     const warn = (message: string): void => { ctx.logger.warn(message) }
     void startDiscoveryBeacon({
       hostPort,
       ports: resolved.beaconPorts,
+      ...(resolved.pairedBeacon ? {
+        upgrade: (req, socket, head) => { server.handleUpgrade(req, socket, head, true) },
+      } : {}),
       info: INSTANCE_INFO,
       warn,
     }).then((started) => {
@@ -427,6 +429,7 @@ function mountDiscoveryBeacon(
       return bound?.close()
     }
   }, 'bridge-browser: discovery beacon')
+  return () => beacon?.port
 }
 
 type GatewayCandidate = Pick<TypertGatewayLike, 'invoke'> & {

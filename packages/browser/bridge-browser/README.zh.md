@@ -17,14 +17,31 @@ dsh 的**浏览器操作桥**挂载经过 token 认证的 WebSocket 通道（`/e
 | `devToolsMaxChars` | `number` | 24000 | 单次开发者工具结果渲染字符上限，最小为 500。 |
 | `sessionWorkspacePath` | `string` | `~/.dsh/browser-sessions` | 扩展创建的会话所用的专用 Host Workspace。插件会在首次调用未显式指定工作区的 `session.create` 时创建并幂等注册该目录；会话的 cwd 随之变为此路径，因此 GUI 会显示 `browser-sessions` 工作区分组。设为 `""` 可让会话继续显示在“未分组”中。 |
 | `deferSessionCreate` | `boolean` | `true` | 会话只在第一条消息时才真正创建：`session.create` 先返回一个内存暂定 ID（不落库），历史读取为空，第一次 `session.prompt` 才创建真实会话（同一 ID、回放原始创建参数）。只打开面板不说话，会在会话库/GUI 里不留任何痕迹。 |
-| `beacon` | `boolean` | `true` | 同时在固定的回环信标端口上回答发现端点，让随机分配的 Web 端口（DSH Desktop 用 `--port 0` 启动 Host）保持可发现。绑定失败只记诊断，不影响桥本身。 |
+| `beacon` | `boolean` | `true` | 同时在固定的回环信标端口上回答发现端点，让随机分配的 Web 端口（DSH Desktop 用 `--port 0` 启动 Host）保持可发现。默认模式下，信标端口全被占用不影响 Web 桥。 |
 | `beaconPorts` | `number[]` | `43189…43198` | 候选信标端口，按序尝试直到绑定成功；取第一个空闲端口，多个本地实例因此都能被发现。`beacon` 为 false 时忽略。 |
+| `pairedBeacon` | `boolean` | `false` | 由本机信标而非 Web 宿主接收 WebSocket 连接。要求 `beacon: true`、Web 只绑定回环地址，且扩展填写 Token。 |
 
 工作区分组采用尽力而为方式。如果组合没有 workspace 域、目录创建失败，或 `workspace.create` 拒绝该路径，插件会记录一条警告，并在不注入工作区的情况下发送所有会话创建请求，因此浏览器聊天仍可使用。
 
 ## 使用
 
 安装、更新、启动和卸载方式见根目录 README 的[详细安装与使用](../../../README.zh.md#详细安装与使用)。
+
+### 在 DSH 0.2.3-alpha.2 上使用本机配对
+
+这个版本会先校验请求来源，再把 WebSocket 交给插件，因此扩展无法连接默认的 Web 路由。在实际使用的 Profile 的 Cordis 补丁中设置：
+
+```yaml
+- id: bridge-browser
+  config:
+    pairedBeacon: true
+```
+
+在扩展设置里填写一次桥接 Token。使用已配置的 `token`，或在本机读取 DSH 主目录下的 `ext-bridge-token`。扩展仍可自动发现地址；如果手动填写，请使用 DSH 设置页显示的桥地址。此模式不改变 Web 宿主的认证规则。
+
+如果所有配置的信标端口都不可用，配对桥会离线。请释放一个端口，或调整 `beaconPorts`；配对模式不会回退到 Web 路由。
+
+保持 `pairedBeacon` 关闭可沿用 rc.5 的连接方式。此选项只修复本机连接，不迁移其他宿主 API，也不提供 Alpha.2 的远程配对。
 
 ## 开发
 

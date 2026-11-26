@@ -1,10 +1,11 @@
 import { mkdtemp, rm } from 'node:fs/promises'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
-import { BEACON_PORTS } from '../src/protocol.ts'
+import { BEACON_PORTS, BRIDGE_CONFIG_PATH } from '../src/protocol.ts'
 import { apply as applyPlugin, Config } from '../src/index.ts'
 
 async function apply(ctx: Context, config: Config): Promise<void> {
@@ -77,6 +78,7 @@ describe('config', () => {
       sessionWorkspacePath: dshHomePath('browser-sessions'),
       deferSessionCreate: true,
       beacon: true,
+      pairedBeacon: false,
       beaconPorts: [...BEACON_PORTS],
     })
   })
@@ -99,6 +101,7 @@ describe('config', () => {
       sessionWorkspacePath: '',
       deferSessionCreate: false,
       beacon: false,
+      pairedBeacon: false,
       beaconPorts: [...BEACON_PORTS],
     })
   })
@@ -174,6 +177,41 @@ describe('apply', () => {
       ports: [...BEACON_PORTS],
       info: { pid: process.pid },
     })
+  })
+
+  it('uses only the paired beacon for upgrades when enabled', async () => {
+    const ctx = stubContext()
+    const register = vi.spyOn(ctx.webServer, 'registerUpgrade')
+    await apply(ctx, new Config({ token: 'fixed-token', sessionWorkspacePath: '', pairedBeacon: true }))
+
+    expect(register).not.toHaveBeenCalled()
+    expect(beaconMock.start.mock.calls[0]?.[0]).toMatchObject({ upgrade: expect.any(Function) })
+  })
+
+  it.each([
+    { beacon: { port: 43195, close: async () => {} }, status: 200 },
+    { beacon: undefined, status: 503 },
+  ])('reports the paired address only when the beacon binds ($status)', async ({ beacon, status }) => {
+    beaconMock.start.mockResolvedValueOnce(beacon)
+    const ctx = stubContext()
+    const register = vi.spyOn(ctx.webServer, 'register')
+    await apply(ctx, { token: 'fixed-token', pairedBeacon: true, sessionWorkspacePath: '' })
+    const route = register.mock.calls.map(([candidate]) => candidate).find(candidate => candidate.path === BRIDGE_CONFIG_PATH)
+    if (route?.kind !== 'exact') throw new Error('Discovery route not registered')
+    const writeHead = vi.fn()
+    const end = vi.fn()
+    await route.handler({} as IncomingMessage, { writeHead, end } as unknown as ServerResponse)
+    expect(writeHead.mock.calls[0]?.[0]).toBe(status)
+    if (beacon === undefined) expect(end).toHaveBeenCalledWith()
+    else expect(JSON.parse(end.mock.calls[0]?.[0])).toMatchObject({ wsUrl: `ws://127.0.0.1:${beacon.port}/ext/bridge` })
+  })
+
+  it('requires an enabled loopback beacon in paired mode', async () => {
+    const ctx = stubContext()
+    await expect(apply(ctx, new Config({ pairedBeacon: true, beacon: false }))).rejects.toThrow(/pairedBeacon requires/)
+    Object.assign(ctx.webServer, { host: '0.0.0.0' })
+    await expect(apply(ctx, new Config({ pairedBeacon: true }))).rejects.toThrow(/pairedBeacon requires/)
+    expect(beaconMock.start).not.toHaveBeenCalled()
   })
 
   it('honours a custom port list and the beacon opt-out', async () => {
