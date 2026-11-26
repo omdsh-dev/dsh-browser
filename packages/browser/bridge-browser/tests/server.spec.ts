@@ -29,7 +29,7 @@ interface Harness {
   respondMock: ReturnType<typeof vi.fn>
 }
 
-async function startBridge(overrides: Partial<ConstructorParameters<typeof BridgeServer>[0]> = {}): Promise<Harness> {
+async function startBridge(overrides: Partial<ConstructorParameters<typeof BridgeServer>[0]> = {}, requireToken = false): Promise<Harness> {
   const callMock = vi.fn(async () => ({ ok: true as const, value: 'ok' }))
   const respondMock = vi.fn(async () => ({ accepted: true }))
   const events: AsyncIterable<HostEventFrame> = {
@@ -53,7 +53,7 @@ async function startBridge(overrides: Partial<ConstructorParameters<typeof Bridg
     ...overrides,
   })
   const server = createServer()
-  server.on('upgrade', (req, socket, head) => { bridge.handleUpgrade(req, socket, head) })
+  server.on('upgrade', (req, socket, head) => { bridge.handleUpgrade(req, socket, head, requireToken) })
   await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve) })
   const port = (server.address() as AddressInfo).port
   return { bridge, server, url: `ws://127.0.0.1:${port}/ext/bridge`, callMock, respondMock }
@@ -175,6 +175,21 @@ describe('BridgeServer', () => {
     await waitFor(() => frames.some((f) => f.t === 'hello.ok'))
     expect(frames.find((f) => f.t === 'hello.ok')).toBeDefined()
     ws.close()
+  })
+
+  it('requires a valid hello token from Chrome on a paired listener', async () => {
+    const h = await startBridge({}, true)
+    harnesses.push(h)
+    for (const token of ['', 'wrong-token']) {
+      const { ws } = await connect(h.url, EXT_ORIGIN)
+      const closed = new Promise(resolve => ws.once('close', resolve))
+      send(ws, { t: 'hello', token, caps: CAPS })
+      expect(await closed).toBe(4002)
+      expect(h.bridge.hasConnection()).toBe(false)
+    }
+    const { ws, frames } = await connect(h.url, EXT_ORIGIN)
+    send(ws, { t: 'hello', token: TOKEN, caps: CAPS })
+    await waitFor(() => frames.some(frame => frame.t === 'hello.ok'))
   })
 
   it('rejects loopback connections without a token when Origin is not an extension (malicious page)', async () => {

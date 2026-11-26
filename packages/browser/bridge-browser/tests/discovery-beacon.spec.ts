@@ -182,6 +182,51 @@ describe('startDiscoveryBeacon', () => {
     expect(warn.mock.calls[0]?.[0]).toMatch(/every discovery beacon port is busy/)
   })
 
+  it('advertises its own bound port when it accepts paired upgrades', async () => {
+    const port = await freePort()
+    const upgrade = vi.fn()
+    const beacon = await startDiscoveryBeacon({ hostPort: 3080, ports: [port], upgrade })
+    if (beacon === undefined) throw new Error('beacon did not bind')
+    beacons.push(beacon)
+
+    const config = await send(port, '/ext/bridge-config')
+    expect(config.status).toBe(200)
+    expect(JSON.parse(config.body)).toMatchObject({ wsUrl: `ws://127.0.0.1:${port}/ext/bridge`, beacon: true })
+  })
+
+  it('admits only extension upgrades on the paired path and closes them with the beacon', async () => {
+    const port = await freePort()
+    const upgrade = vi.fn((_req, socket) => {
+      socket.write('HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n')
+    })
+    const beacon = await startDiscoveryBeacon({ hostPort: 3080, ports: [port], upgrade })
+    if (beacon === undefined) throw new Error('beacon did not bind')
+    beacons.push(beacon)
+
+    const chrome = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop'
+    const firefox = 'moz-extension://8eb30a3f-ad6b-4da1-8960-b6bded4431ee'
+    const attempt = (origin?: string, host?: string, path = '/ext/bridge') => new Promise<{ status: number; socketsClosed?: Promise<void> }>((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port, path, headers: { Connection: 'Upgrade', Upgrade: 'websocket', ...(origin ? { Origin: origin } : {}), ...(host ? { Host: host } : {}) } })
+      req.on('error', reject)
+      req.on('response', res => { res.resume(); resolve({ status: res.statusCode ?? 0 }) })
+      req.on('upgrade', (res, socket) => {
+        socket.resume()
+        resolve({ status: res.statusCode ?? 0, socketsClosed: new Promise(ok => socket.once('close', ok)) })
+      })
+      req.end()
+    })
+    expect(await attempt()).toEqual({ status: 403 })
+    expect(await attempt('https://example.test')).toEqual({ status: 403 })
+    expect(await attempt(chrome, 'example.test')).toEqual({ status: 403 })
+    expect(await attempt(chrome, undefined, '/elsewhere')).toEqual({ status: 404 })
+    expect(upgrade).not.toHaveBeenCalled()
+
+    const connections = await Promise.all([attempt(chrome), attempt(firefox)])
+    expect(connections.map(connection => connection.status)).toEqual([101, 101])
+    await beacon.close()
+    await Promise.all(connections.map(connection => connection.socketsClosed))
+  })
+
   it('releases the port on close', async () => {
     const port = await freePort()
     const beacon = await startDiscoveryBeacon({ hostPort: 3080, ports: [port] })

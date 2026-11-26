@@ -12,14 +12,17 @@
  *
  * Hardening: binds loopback only, sends no CORS headers (a web page cannot read
  * the answer), rejects a foreign `Host` header (DNS rebinding), and carries
- * nothing secret — the bridge WebSocket still authenticates every client.
+ * nothing secret. If configured for pairing, the same listener accepts extension
+ * WebSocket upgrades and the bridge requires a token in the hello frame.
  *
  * @module @yuxianglin/dsh-bridge-browser/src/discovery-beacon
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import type { Duplex } from 'node:stream'
 import {
   BRIDGE_CONFIG_PATH,
+  BRIDGE_PATH,
   bridgeConfigPayload,
   type BridgeInstanceInfo,
 } from './protocol.ts'
@@ -30,6 +33,8 @@ export interface DiscoveryBeaconOptions {
   hostPort: number | (() => number | undefined)
   /** Candidate ports, tried in order until one binds. */
   ports: readonly number[]
+  /** Serve a paired bridge on the beacon port instead of advertising the Web port. */
+  upgrade?: (req: IncomingMessage, socket: Duplex, head: Buffer) => void
   /** Instance metadata carried in every answer. */
   info?: BridgeInstanceInfo
   /** Diagnostics sink; silent by default so embedding stays quiet. */
@@ -97,7 +102,7 @@ export function isBeaconHost(header: string | undefined, port: number): boolean 
  * Bind the first free discovery port and serve the config answer.
  *
  * Never throws: a host that cannot bind any candidate keeps running without a
- * beacon, and the extension still finds it by scanning.
+ * beacon. Legacy discovery can still scan Web ports; paired mode remains unavailable.
  * @param options - ports, host port source, instance metadata, diagnostics sink.
  * @returns the bound beacon, or `undefined` when every candidate is taken.
  */
@@ -107,8 +112,24 @@ export async function startDiscoveryBeacon(
   const ports = sanitizeBeaconPorts(options.ports)
   const warn = options.warn ?? ((): void => {})
   for (const port of ports) {
-    let server: Server | undefined
-    server = createServer((req, res) => { answer(req, res, server as Server, options) })
+    const server: Server = createServer((req, res) => { answer(req, res, server, options) })
+    const upgraded = new Set<Duplex>()
+    const upgrade = options.upgrade
+    if (upgrade !== undefined) {
+      server.on('upgrade', (req, socket, head) => {
+        if (!isBeaconHost(req.headers.host, boundPort(server)) || !isExtensionOrigin(req.headers.origin)) {
+          socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
+          return
+        }
+        if (req.url !== BRIDGE_PATH) {
+          socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
+          return
+        }
+        upgraded.add(socket)
+        socket.once('close', () => { upgraded.delete(socket) })
+        upgrade(req, socket, head)
+      })
+    }
     try {
       await listen(server, port)
     } catch (error) {
@@ -123,13 +144,27 @@ export async function startDiscoveryBeacon(
     const bound = boundPort(server)
     return {
       port: bound,
-      close: () => closeServer(server),
+      close: () => {
+        // HTTP connection cleanup does not include upgraded WebSockets.
+        for (const socket of upgraded) socket.destroy()
+        return closeServer(server)
+      },
     }
   }
   if (ports.length > 0) {
-    warn(`browser bridge: every discovery beacon port is busy (${ports.join(', ')}); the extension has to scan for this instance`)
+    const impact = options.upgrade === undefined
+      ? 'the extension has to scan for this instance'
+      : 'the paired bridge is unavailable'
+    warn(`browser bridge: every discovery beacon port is busy (${ports.join(', ')}); ${impact}`)
   }
   return undefined
+}
+
+/** Only extension contexts may reach the paired bridge. The hello token supplies identity. */
+function isExtensionOrigin(origin: string | undefined): boolean {
+  if (origin === undefined) return false
+  return /^chrome-extension:\/\/[a-p]{32}$/.test(origin)
+    || /^moz-extension:\/\/[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(origin)
 }
 
 /** Answer one beacon request. */
@@ -153,9 +188,11 @@ function answer(
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     return finish(res, 405, { allow: 'GET, HEAD' })
   }
-  const hostPort = typeof options.hostPort === 'function' ? options.hostPort() : options.hostPort
-  if (hostPort === undefined || !Number.isInteger(hostPort) || hostPort < 1) return finish(res, 503)
-  const body = JSON.stringify(bridgeConfigPayload(hostPort, options.info, true))
+  const bridgePort = options.upgrade !== undefined
+    ? port
+    : typeof options.hostPort === 'function' ? options.hostPort() : options.hostPort
+  if (bridgePort === undefined || !Number.isInteger(bridgePort) || bridgePort < 1) return finish(res, 503)
+  const body = JSON.stringify(bridgeConfigPayload(bridgePort, options.info, true))
   finish(res, 200, {
     'content-type': 'application/json',
     'cache-control': 'no-store',

@@ -172,11 +172,12 @@ export class BridgeServer {
    * @param req - upgrade request (carries the client's remote address).
    * @param socket - raw socket transferred by the HTTP server.
    * @param head - bytes already read after the upgrade headers.
+   * @param requireToken - require the hello token even for a Chrome extension on loopback.
    */
-  handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
+  handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer, requireToken = false): void {
     const remote = this.deps.remoteAddressOverride ?? req.socket.remoteAddress
     const origin = req.headers.origin
-    this.wss.handleUpgrade(req, socket, head, (ws) => { this.attach(ws, remote, origin) })
+    this.wss.handleUpgrade(req, socket, head, (ws) => { this.attach(ws, remote, origin, requireToken) })
   }
 
   /**
@@ -291,7 +292,7 @@ export class BridgeServer {
     return isDevToolsCaps(this.current?.clientCaps.devTools)
   }
 
-  private attach(ws: WebSocket, remoteAddress: string | undefined, origin: string | undefined): void {
+  private attach(ws: WebSocket, remoteAddress: string | undefined, origin: string | undefined, requireToken: boolean): void {
     let helloTimer: NodeJS.Timeout | undefined = setTimeout(() => {
       ws.close(4001, 'hello timeout')
     }, this.deps.helloTimeoutMs ?? HELLO_TIMEOUT_MS)
@@ -319,7 +320,7 @@ export class BridgeServer {
         // per-install UUID rather than the manifest's stable Gecko ID, so
         // they are not an identity boundary and must present the bearer token.
         // Non-loopback remotes must also present the bearer token.
-        const loopbackNoToken = isLoopbackAddress(remoteAddress)
+        const loopbackNoToken = !requireToken && isLoopbackAddress(remoteAddress)
           && typeof origin === 'string'
           && origin.startsWith('chrome-extension://')
         if (!loopbackNoToken && !verifyToken(this.deps.token, frame.token)) {
